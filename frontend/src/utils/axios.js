@@ -1,0 +1,56 @@
+import axios from 'axios'
+
+// ── Axios 實例設定 ────────────────────────────────────────────────
+const apiClient = axios.create({
+  baseURL: 'http://localhost:8000',
+  timeout: 15000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+})
+
+// ── Request Interceptor：注入 JWT Token ───────────────────────────
+apiClient.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('acctassist_token')
+    if (token) config.headers.Authorization = `Bearer ${token}`
+    return config
+  },
+  (error) => {
+    console.error('[Axios Request Error]', error)
+    return Promise.reject(error)
+  }
+)
+
+// ── Response Interceptor（統一錯誤攔截 + Console 除錯） ───────────
+apiClient.interceptors.response.use(
+  (response) => {
+    // 後端統一回傳格式：{ status, data, message }
+    // 若後端回傳 status === 'error'，視為業務邏輯錯誤
+    if (response.data?.status === 'error') {
+      const msg = response.data.message || '後端回傳業務邏輯錯誤'
+      console.warn('[API Business Error]', msg, response.data)
+    }
+    return response
+  },
+  (error) => {
+    if (error.response) {
+      const { status, data } = error.response
+      // 401 → 清除 token 並跳轉登入頁
+      if (status === 401) {
+        localStorage.removeItem('acctassist_token')
+        window.location.href = '/login'
+        return Promise.reject(error)
+      }
+      console.error(`[API HTTP ${status}]`, data?.detail || data?.message || error.message)
+    } else if (error.request) {
+      // 請求送出但沒有收到回應（後端未啟動或 CORS 問題）
+      console.error('[API No Response] 後端可能未啟動，請確認 http://localhost:8000 是否運行中')
+    } else {
+      console.error('[API Setup Error]', error.message)
+    }
+    return Promise.reject(error)
+  }
+)
+
+export default apiClient

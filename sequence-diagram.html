@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AcctAssist — Sequence Diagrams</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    body { background: #f1f5f9; }
+    .tab-btn { transition: all 0.2s; }
+    .tab-btn.active {
+      background: #1e40af;
+      color: white;
+      border-color: #1e40af;
+    }
+    .diagram-panel { display: none; }
+    .diagram-panel.active { display: block; }
+    .mermaid svg { max-width: 100%; height: auto; }
+    /* 讓 Mermaid 初始渲染用：先全部顯示，JS 再隱藏 */
+    .diagram-panel.pre-render { display: block !important; visibility: hidden; position: absolute; left: -9999px; }
+  </style>
+</head>
+<body class="min-h-screen p-6">
+
+  <!-- Header -->
+  <div class="max-w-7xl mx-auto">
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold text-slate-800">AcctAssist — Sequence Diagrams</h1>
+      <p class="text-slate-500 mt-1">系統互動流程時序圖 | 2026-04-14</p>
+    </div>
+
+    <!-- Actor 圖例 -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6">
+      <h2 class="text-sm font-semibold text-slate-600 mb-3">Actor 圖例</h2>
+      <div class="flex flex-wrap gap-3 text-sm">
+        <span class="px-3 py-1 bg-blue-50 text-blue-700 rounded-full border border-blue-200"><b>U</b> — LINE User（報帳者）</span>
+        <span class="px-3 py-1 bg-green-50 text-green-700 rounded-full border border-green-200"><b>LP</b> — LINE Platform</span>
+        <span class="px-3 py-1 bg-purple-50 text-purple-700 rounded-full border border-purple-200"><b>WH</b> — Webhook Handler (routers/webhook.py)</span>
+        <span class="px-3 py-1 bg-orange-50 text-orange-700 rounded-full border border-orange-200"><b>ES</b> — Expense Service (services/expense_service.py)</span>
+        <span class="px-3 py-1 bg-cyan-50 text-cyan-700 rounded-full border border-cyan-200"><b>LS</b> — Line Service (services/line_service.py)</span>
+        <span class="px-3 py-1 bg-rose-50 text-rose-700 rounded-full border border-rose-200"><b>OCR</b> — OCR Service / Gemini API</span>
+        <span class="px-3 py-1 bg-amber-50 text-amber-700 rounded-full border border-amber-200"><b>TM</b> — Auto Split Timer (services/auto_split_timer.py)</span>
+        <span class="px-3 py-1 bg-teal-50 text-teal-700 rounded-full border border-teal-200"><b>AS</b> — Auto Split Service (services/auto_split_service.py)</span>
+        <span class="px-3 py-1 bg-slate-100 text-slate-700 rounded-full border border-slate-200"><b>DB</b> — PostgreSQL</span>
+        <span class="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full border border-indigo-200"><b>ADM</b> — Admin User（審核者）</span>
+        <span class="px-3 py-1 bg-violet-50 text-violet-700 rounded-full border border-violet-200"><b>FE</b> — Vue3 Dashboard Frontend</span>
+        <span class="px-3 py-1 bg-fuchsia-50 text-fuchsia-700 rounded-full border border-fuchsia-200"><b>AR</b> — Auth Router (routers/auth.py)</span>
+        <span class="px-3 py-1 bg-pink-50 text-pink-700 rounded-full border border-pink-200"><b>ER</b> — Expense Router (routers/expenses.py)</span>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex flex-wrap gap-2 mb-4">
+      <button class="tab-btn active px-4 py-2 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 bg-white" onclick="switchTab(0, this)">
+        流程一：初始化
+      </button>
+      <button class="tab-btn px-4 py-2 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 bg-white" onclick="switchTab(1, this)">
+        流程二：手動確認送出
+      </button>
+      <button class="tab-btn px-4 py-2 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 bg-white" onclick="switchTab(2, this)">
+        流程三：自動切割
+      </button>
+      <button class="tab-btn px-4 py-2 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 bg-white" onclick="switchTab(3, this)">
+        流程四：補件流程
+      </button>
+      <button class="tab-btn px-4 py-2 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 bg-white" onclick="switchTab(4, this)">
+        流程五：Dashboard 審核
+      </button>
+    </div>
+
+    <!-- Diagram Panels -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+
+      <!-- Flow 1 -->
+      <div class="diagram-panel active" id="panel-0">
+        <h2 class="text-xl font-bold text-slate-700 mb-1">流程一：初始化 — 部門選擇 + 身份綁定</h2>
+        <p class="text-sm text-slate-500 mb-4">使用者首次互動時，系統引導選擇部門；若啟用員工綁定（enable_user_binding=True），進一步綁定真實姓名。</p>
+        <div class="mermaid">
+sequenceDiagram
+    participant U as U (LINE User)
+    participant LP as LP (LINE Platform)
+    participant WH as WH (Webhook)
+    participant ES as ES (Expense Service)
+    participant LS as LS (Line Service)
+    participant DB as DB (PostgreSQL)
+
+    U->>LP: 傳送任意訊息
+    LP->>WH: POST /webhook (MessageEvent)
+    WH->>ES: get_or_create_user(line_user_id)
+    ES->>DB: SELECT / INSERT users
+    DB-->>ES: User 物件
+    ES-->>WH: user
+
+    alt user.department is None（未設定部門）
+        WH->>LS: reply_with_dept_selection(reply_token)
+        LS->>LP: LINE Reply API（Quick Reply 部門選單）
+        LP->>U: 部門選擇選單
+
+        U->>LP: 選擇部門（例："攝影組"）
+        LP->>WH: POST /webhook (TextMessage)
+        WH->>ES: update_user_department(db, line_user_id, dept)
+        ES->>DB: UPDATE users SET department=攝影組
+        DB-->>ES: OK
+        WH->>LS: reply_text(reply_token, "已設定部門：攝影組")
+        LS->>LP: LINE Reply API
+        LP->>U: 確認訊息
+    end
+
+    opt enable_user_binding=True 且 user.real_name is None
+        WH->>LS: set_user_state(db, line_user_id, BINDING_REAL_NAME)
+        LS->>DB: UPSERT user_states(step=BINDING_REAL_NAME)
+        WH->>LS: reply_text(reply_token, "請輸入真實姓名")
+        LS->>LP: LINE Reply API
+        LP->>U: "請輸入真實姓名"
+
+        U->>LP: 傳送姓名（例："王小明"）
+        LP->>WH: POST /webhook (TextMessage)
+        WH->>LS: get_user_state(db, line_user_id)
+        LS->>DB: SELECT user_states
+        DB-->>LS: step=BINDING_REAL_NAME
+        LS-->>WH: step=BINDING_REAL_NAME
+        WH->>ES: update_user_real_name(db, line_user_id, "王小明")
+        ES->>DB: UPDATE users SET real_name=王小明
+        DB-->>ES: OK
+        WH->>LS: delete_user_state(db, line_user_id)
+        LS->>DB: DELETE user_states
+        WH->>LS: reply_text(reply_token, "綁定成功！")
+        LS->>LP: LINE Reply API
+        LP->>U: "綁定成功！請繼續報帳"
+    end
+        </div>
+      </div>
+
+      <!-- Flow 2 -->
+      <div class="diagram-panel" id="panel-1">
+        <h2 class="text-xl font-bold text-slate-700 mb-1">流程二：LINE Bot 報帳 — 手動確認送出（trigger_by=manual_button）</h2>
+        <p class="text-sm text-slate-500 mb-4">使用者連續上傳多張圖片與文字備註，全部累積後按一次「確認送出」，系統彙整為 <strong>1 筆 Expense + N 筆 ExpenseImage</strong>。</p>
+        <div class="mermaid">
+sequenceDiagram
+    participant U as U (LINE User)
+    participant LP as LP (LINE Platform)
+    participant WH as WH (Webhook)
+    participant LS as LS (Line Service)
+    participant TM as TM (Auto Split Timer)
+    participant OCR as OCR (Gemini API)
+    participant ES as ES (Expense Service)
+    participant DB as DB (PostgreSQL)
+
+    Note over U,DB: 多圖 + 文字累積階段（COLLECTING 狀態）
+
+    U->>LP: 上傳圖片 1
+    LP->>WH: POST /webhook (ImageMessage)
+    WH->>LS: download_image(message_id)
+    LS->>LP: GET content.line-sapi.com/{messageId}/content
+    LP-->>LS: 圖片 binary
+    LS-->>WH: uploads/{uuid1}.jpg
+
+    WH->>DB: SELECT FOR UPDATE user_states
+    DB-->>WH: (無記錄)
+    WH->>DB: INSERT user_states(step=COLLECTING, dept=dept)
+    WH->>DB: UPDATE pending_images=[{path,timestamp,message_id}]
+    DB-->>WH: OK
+
+    opt enable_auto_split=True
+        WH->>TM: schedule(line_user_id, 60s, callback)
+        Note right of TM: Timer_1 啟動（60s 滑動視窗）
+    end
+    Note right of WH: 靜默，不回應使用者
+
+    U->>LP: 傳送文字備註（可穿插圖片間）
+    LP->>WH: POST /webhook (TextMessage，非指令）
+    WH->>DB: SELECT user_states（確認 step=COLLECTING）
+    DB-->>WH: step=COLLECTING
+    WH->>DB: UPDATE pending_description += text
+    DB-->>WH: OK
+    Note right of WH: 靜默，不回應使用者
+
+    loop 上傳圖片 2 … N（重複）
+        U->>LP: 上傳圖片 N
+        LP->>WH: POST /webhook (ImageMessage)
+        WH->>LS: download_image(message_id)
+        LS-->>WH: uploads/{uuidN}.jpg
+        WH->>DB: SELECT FOR UPDATE user_states
+        WH->>DB: UPDATE pending_images（append {path,timestamp,message_id}）
+        DB-->>WH: OK
+        opt enable_auto_split=True
+            WH->>TM: cancel(line_user_id)
+            WH->>TM: schedule(line_user_id, 60s, callback)
+            Note right of TM: 取消舊 Timer，重設滑動視窗
+        end
+        Note right of WH: 靜默，不回應使用者
+    end
+
+    Note over U,DB: 使用者按「確認送出」Rich Menu
+
+    U->>LP: 點擊「確認送出」按鈕
+    LP->>WH: POST /webhook (PostbackEvent: action=confirm_submit)
+
+    opt enable_auto_split=True
+        WH->>TM: cancel(line_user_id)
+        Note right of TM: Timer 立即取消
+    end
+
+    WH->>LS: reply_text(reply_token, "已收到，處理中…")
+    LS->>LP: LINE Reply API（優先回應，< 500ms）
+    LP->>U: "已收到，處理中…"
+
+    WH->>DB: SELECT pending_images（N 筆路徑）、pending_description
+    DB-->>WH: images[]、description
+    WH->>DB: UPDATE pending_images="[]"、pending_description=""
+    DB-->>WH: OK（清空 buffer）
+
+    Note over WH,DB: BackgroundTask: _process_batch(trigger_by="manual_button")
+
+    loop 序列 OCR（避免 Gemini 429 限流）
+        WH->>OCR: classify_and_extract(image_path_i)
+        Note right of OCR: MULTI_TASK_PROMPT：分類 + 欄位提取
+        OCR-->>WH: ImageOCRResult(is_voucher, voucher_category, fields)
+    end
+
+    WH->>ES: create_batch_expense(user_id, images[], ocr_results[], trigger_by="manual_button")
+    Note right of ES: _pick_primary_fields()：INVOICE > RECEIPT > LABOR_SERVICE > TRANSPORTATION
+    Note right of ES: total_amount = Σ is_voucher=True（含 CREDIT_NOTE 負數）
+    Note right of ES: voucher_categories：去重後 JSON 清單
+    Note right of ES: _generate_serial_number()：EXP-YYYYMM-NNNN（衝突重試 5 次）
+    Note right of ES: status = PENDING（total_amount 有值）/ NEEDS_MANUAL_REVIEW
+    ES->>DB: INSERT expenses（1 筆）
+    ES->>DB: INSERT expense_images × N（含 sequence_order、ocr_result JSON）
+    DB-->>ES: OK
+    ES-->>WH: expense（含 serial_number）
+
+    WH->>LS: push_text(line_user_id, 報帳摘要)
+    LS->>LP: LINE Push API
+    LP->>U: 摘要訊息（序號 EXP-YYYYMM-NNNN、總金額、張數）
+        </div>
+      </div>
+
+      <!-- Flow 3 -->
+      <div class="diagram-panel" id="panel-2">
+        <h2 class="text-xl font-bold text-slate-700 mb-1">流程三：LINE Bot 報帳 — 自動切割（trigger_by=auto_split）</h2>
+        <p class="text-sm text-slate-500 mb-4">enable_auto_split=True 時，60 秒無新上傳即觸發。依 OCR 的 <strong>is_voucher</strong> 欄位將圖片分組，每組建立一筆 Expense（可產生多筆）。使用者無感。</p>
+        <div class="mermaid">
+sequenceDiagram
+    participant U as U (LINE User)
+    participant LP as LP (LINE Platform)
+    participant WH as WH (Webhook)
+    participant TM as TM (Auto Split Timer)
+    participant AS as AS (Auto Split Service)
+    participant OCR as OCR (Gemini API)
+    participant ES as ES (Expense Service)
+    participant DB as DB (PostgreSQL)
+
+    Note over U,DB: 多圖 + 文字累積（與流程二相同，靜默收集）
+
+    loop 上傳圖片 1 … N
+        U->>LP: 上傳圖片
+        LP->>WH: POST /webhook (ImageMessage)
+        WH->>WH: download_image() → uploads/{uuid}.jpg
+        WH->>DB: SELECT FOR UPDATE user_states
+        WH->>DB: UPDATE pending_images（append），db.commit()
+        WH->>TM: cancel(line_user_id)
+        WH->>TM: schedule(line_user_id, 60s, auto_split_process)
+        Note right of TM: 每次上傳重設 60s 滑動視窗
+        Note right of WH: 靜默，不回應
+    end
+
+    Note over TM,DB: 60 秒無新圖片 → Timer 到期
+
+    TM->>AS: auto_split_process(line_user_id, user_id, uploader_name, uploader_dept)
+
+    AS->>DB: SELECT user_states WHERE line_user_id=...
+    DB-->>AS: pending_images (N 筆)、pending_description
+
+    alt pending_images 為空
+        AS-->>TM: log "no pending images, skip" + return
+    end
+
+    Note right of AS: _parse_buffer()：解析 JSON → 依 timestamp ASC 排序
+    AS->>DB: UPDATE pending_images="[]"、pending_description=""
+    AS->>DB: COMMIT（立即清空，防重複觸發）
+    DB-->>AS: OK
+
+    loop 序列 OCR（避免 429 限流）
+        AS->>OCR: classify_and_extract(image_path_i)
+        Note right of OCR: 含 is_voucher、voucher_category、fields
+        OCR-->>AS: ImageOCRResult_i
+    end
+
+    Note right of AS: multi_split_logic(entries, ocr_results)
+    Note right of AS: 憑證(is_voucher=True)為群組斷點
+    Note right of AS: 非憑證附加至當前群組（若有）
+    Note right of AS: 範例：[憑證,物品照,憑證,物品照] → 群組A + 群組B
+
+    loop 每個群組（try-except 獨立隔離）
+        AS->>ES: create_batch_expense(..., trigger_by="auto_split")
+        ES->>DB: INSERT expenses（1 筆 / 群組）
+        ES->>DB: INSERT expense_images × 群組張數
+        DB-->>ES: OK（含 serial_number EXP-YYYYMM-NNNN）
+        ES-->>AS: expense
+    end
+
+    Note over U,DB: 使用者無感，系統靜默完成報帳（可能建立多筆 Expense）
+        </div>
+      </div>
+
+      <!-- Flow 4 -->
+      <div class="diagram-panel" id="panel-3">
+        <h2 class="text-xl font-bold text-slate-700 mb-1">流程四：補件流程（退回 → LINE 推播 → 重新上傳）</h2>
+        <p class="text-sm text-slate-500 mb-4">審核者退回報帳單後，系統推播 LINE Flex Message，使用者點擊補件按鈕並上傳新圖片，狀態重回 PENDING 等待再審。</p>
+        <div class="mermaid">
+sequenceDiagram
+    participant ADM as ADM (審核者)
+    participant ER as ER (Expense Router)
+    participant ES as ES (Expense Service)
+    participant LS as LS (Line Service)
+    participant LP as LP (LINE Platform)
+    participant U as U (LINE User)
+    participant WH as WH (Webhook)
+    participant OCR as OCR (Gemini API)
+    participant DB as DB (PostgreSQL)
+
+    ADM->>ER: PATCH /api/v1/expenses/{id}/reject {reason: "發票不清楚"}
+    ER->>ES: reject_expense(db, expense_id, reason)
+    ES->>DB: UPDATE expenses SET status=REJECTED, reject_reason=reason
+    DB-->>ES: OK
+    ES-->>ER: 更新後的 ExpenseRead
+    ER-->>ADM: {status: success}
+
+    opt enable_line_push_reject=True
+        ES->>DB: SELECT users WHERE id=expense.user_id
+        DB-->>ES: line_user_id
+        ES->>LS: push_reject_notification(line_user_id, expense_id, reason)
+        LS->>LP: LINE Push API（Flex Message）
+        LP->>U: 退件通知 + 「重新上傳照片」按鈕
+    end
+
+    U->>LP: 點擊「重新上傳照片」
+    LP->>WH: POST /webhook (PostbackEvent: action=reupload&expense_id=xxx)
+    WH->>LS: set_user_state(db, line_user_id, "REUPLOADING_{expense_id}")
+    LS->>DB: UPSERT user_states(step=REUPLOADING_xxx)
+    DB-->>LS: OK
+    WH->>LS: reply_text(reply_token, "請上傳新的發票/收據照片")
+    LS->>LP: LINE Reply API
+    LP->>U: "請上傳新的發票/收據照片"
+
+    U->>LP: 上傳新圖片
+    LP->>WH: POST /webhook (ImageMessage)
+    WH->>LS: download_image(message_id)
+    LS->>LP: GET LINE Content API
+    LP-->>LS: 圖片 binary
+    LS-->>WH: uploads/{new_uuid}.jpg
+
+    WH->>DB: SELECT user_states WHERE line_user_id=...
+    DB-->>WH: step=REUPLOADING_{expense_id}
+    Note right of WH: step.startswith("REUPLOADING_") → 提取 expense_id
+
+    WH->>OCR: extract_invoice_data(image_path)
+    Note right of OCR: 單張簡化版 INVOICE_PROMPT
+    OCR-->>WH: OCRResult(fields...)
+
+    WH->>ES: reupload_expense(db, expense_id, new_image_path, ocr_fields)
+    ES->>DB: UPDATE expenses SET image_url=new_path, status=SUPPLEMENTED→PENDING, ocr 欄位...
+    DB-->>ES: OK
+
+    WH->>LS: delete_user_state(db, line_user_id)
+    LS->>DB: DELETE user_states
+    WH->>LS: reply_text(reply_token, "補件成功，已重新提交審核")
+    LS->>LP: LINE Reply API
+    LP->>U: "補件成功，已重新提交審核"
+        </div>
+      </div>
+
+      <!-- Flow 5 -->
+      <div class="diagram-panel" id="panel-4">
+        <h2 class="text-xl font-bold text-slate-700 mb-1">流程五：Dashboard 審核流程</h2>
+        <p class="text-sm text-slate-500 mb-4">管理員透過 Vue3 Dashboard 登入（JWT）、查詢報帳清單、查看詳情，並執行核准或退回操作。</p>
+        <div class="mermaid">
+sequenceDiagram
+    participant ADM as ADM (Admin User)
+    participant FE as FE (Vue3 Frontend)
+    participant AR as AR (Auth Router)
+    participant ER as ER (Expense Router)
+    participant ES as ES (Expense Service)
+    participant DB as DB (PostgreSQL)
+
+    Note over ADM,DB: 登入取得 JWT Token
+
+    ADM->>FE: 輸入帳號密碼
+    FE->>AR: POST /api/v1/auth/login {username, password}
+    AR->>DB: SELECT admin_users WHERE username=...
+    DB-->>AR: AdminUser(hashed_password, display_name...)
+    AR->>AR: verify_password(plain, hashed_password)（bcrypt）
+    AR->>AR: create_access_token(subject=username)（JWT, exp=60min）
+    AR-->>FE: {access_token, token_type, display_name, employee_id}
+    FE->>FE: 儲存 token 至 localStorage / store
+
+    Note over ADM,DB: 查詢報帳清單
+
+    ADM->>FE: 選擇篩選條件（status、日期區間）
+    FE->>ER: GET /api/v1/expenses?status=PENDING&page=1&page_size=20
+    Note right of FE: Authorization: Bearer {access_token}
+    ER->>AR: get_current_user(token) — JWT 依賴注入
+    AR->>AR: decode_access_token(token) → 驗證 exp
+    AR-->>ER: admin_user
+    ER->>ES: list_expenses(db, status, date_from, date_to, page, page_size)
+    ES->>DB: SELECT expenses ORDER BY created_at DESC LIMIT/OFFSET
+    DB-->>ES: [Expense...]
+    ES-->>ER: {total, items[]}
+    ER-->>FE: {status: success, data: {total, items[]}}
+    FE->>ADM: 顯示報帳清單
+
+    Note over ADM,DB: 查看單筆詳情 + 多圖
+
+    ADM->>FE: 點擊報帳單列
+    FE->>ER: GET /api/v1/expenses/{id}
+    ER->>ES: get_expense(db, id)
+    ES->>DB: SELECT expense JOIN user WHERE id=...
+    DB-->>ES: ExpenseRead（含所有 OCR 欄位）
+    ER-->>FE: ExpenseRead
+
+    FE->>ER: GET /api/v1/expenses/{id}/images
+    ER->>ES: get_expense_images(db, id)
+    ES->>DB: SELECT expense_images ORDER BY sequence_order ASC
+    DB-->>ES: [ExpenseImage...]（含 ocr_result JSON）
+    ER-->>FE: [ExpenseImage...]
+    FE->>ADM: 顯示發票明細 + 圖片清單
+
+    Note over ADM,DB: 核准
+
+    ADM->>FE: 點擊「核准」按鈕
+    FE->>ER: PATCH /api/v1/expenses/{id} {status: APPROVED}
+    ER->>AR: get_current_user(token)（驗證）
+    ER->>ES: update_expense(db, id, {status: APPROVED})
+    ES->>DB: UPDATE expenses SET status=APPROVED, updated_at=now()
+    DB-->>ES: OK
+    ES-->>ER: 更新後的 ExpenseRead
+    ER-->>FE: {status: success, data: ExpenseRead}
+    FE->>ADM: 顯示「核准成功」
+
+    Note over ADM,DB: 退回（觸發 LINE 推播，詳見流程四）
+
+    ADM->>FE: 輸入退件原因，點擊「退回」
+    FE->>ER: PATCH /api/v1/expenses/{id}/reject {reason: "發票不清楚"}
+    ER->>AR: get_current_user(token)（驗證）
+    ER->>ES: reject_expense(db, id, reason)
+    ES->>DB: UPDATE expenses SET status=REJECTED, reject_reason=reason
+    DB-->>ES: OK
+    Note right of ES: 若 enable_line_push_reject=True → 觸發 LINE 推播（見流程四）
+    ER-->>FE: {status: success, data: ExpenseRead}
+    FE->>ADM: 顯示「已退回，已推播通知」
+        </div>
+      </div>
+
+    </div><!-- end diagram panels container -->
+  </div><!-- end max-w-7xl -->
+
+  <script>
+    // 初始化 Mermaid
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'default',
+      sequence: {
+        diagramMarginX: 20,
+        diagramMarginY: 20,
+        actorMargin: 60,
+        width: 160,
+        height: 60,
+        boxMargin: 10,
+        boxTextMargin: 5,
+        noteMargin: 10,
+        messageMargin: 35,
+        mirrorActors: true,
+        useMaxWidth: true
+      }
+    });
+
+    // 先將所有 panel 設為可見（給 Mermaid 渲染用）
+    document.querySelectorAll('.diagram-panel').forEach(p => {
+      if (!p.classList.contains('active')) {
+        p.classList.add('pre-render');
+      }
+    });
+
+    // 渲染所有 Mermaid 圖
+    mermaid.run().then(() => {
+      // 渲染完成後，隱藏非 active 的 panel
+      document.querySelectorAll('.diagram-panel.pre-render').forEach(p => {
+        p.classList.remove('pre-render');
+      });
+    });
+
+    // Tab 切換
+    function switchTab(index, btn) {
+      // 切換 panel
+      document.querySelectorAll('.diagram-panel').forEach((p, i) => {
+        p.classList.toggle('active', i === index);
+      });
+      // 切換按鈕樣式
+      document.querySelectorAll('.tab-btn').forEach((b) => {
+        b.classList.remove('active');
+      });
+      btn.classList.add('active');
+    }
+  </script>
+
+</body>
+</html>

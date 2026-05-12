@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rich Menu 設計稿 — AcctAssist Sprint 2</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #f0f2f5;
+      font-family: 'Noto Sans TC', 'Microsoft JhengHei', sans-serif;
+      padding: 32px 24px;
+      min-height: 100vh;
+    }
+
+    /* ── 頁頭規格資訊 ── */
+    .spec-header {
+      max-width: 900px;
+      margin: 0 auto 28px;
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px 28px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+    }
+
+    .spec-header h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #111;
+      margin-bottom: 12px;
+    }
+
+    .spec-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13.5px;
+    }
+    .spec-table th,
+    .spec-table td {
+      padding: 7px 14px;
+      text-align: left;
+      border: 1px solid #e5e7eb;
+    }
+    .spec-table th {
+      background: #f9fafb;
+      font-weight: 600;
+      color: #374151;
+      width: 160px;
+    }
+    .spec-table td {
+      color: #111;
+    }
+    .badge {
+      display: inline-block;
+      background: #dcfce7;
+      color: #15803d;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 2px 10px;
+      border-radius: 20px;
+      border: 1px solid #86efac;
+    }
+
+    /* ── 縮放容器（模擬瀏覽器內預覽） ── */
+    .preview-wrapper {
+      max-width: 900px;
+      margin: 0 auto 24px;
+    }
+    .preview-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #6b7280;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .scale-note {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-bottom: 12px;
+    }
+
+    /* ── Rich Menu 本體（依 LINE 2500×843 比例） ── */
+    .rich-menu-outer {
+      width: 100%;
+      background: #fff;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.12);
+      border: 2px solid #d1d5db;
+    }
+    /* 保持 2500:843 比例 */
+    .rich-menu-ratio {
+      position: relative;
+      width: 100%;
+      padding-top: calc(843 / 2500 * 100%);
+    }
+    .rich-menu-inner {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, #06b35a 0%, #00a651 60%, #009145 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+    }
+
+    /* 格線（單格全寬，但顯示格線邊框強調邊界） */
+    .rich-menu-cell {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background 0.15s;
+      position: relative;
+    }
+    .rich-menu-cell:hover {
+      background: rgba(255,255,255,0.08);
+    }
+
+    .check-icon {
+      font-size: clamp(36px, 8vw, 80px);
+      line-height: 1;
+      margin-bottom: 0.3em;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.25));
+    }
+
+    .cell-label {
+      font-size: clamp(18px, 4vw, 52px);
+      font-weight: 800;
+      color: #ffffff;
+      letter-spacing: 0.06em;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+
+    /* 動作標注 */
+    .action-badge {
+      position: absolute;
+      bottom: clamp(6px, 2%, 18px);
+      right: clamp(8px, 2%, 20px);
+      background: rgba(0,0,0,0.55);
+      color: #fff;
+      font-size: clamp(9px, 1.2vw, 14px);
+      font-weight: 500;
+      padding: 4px 12px;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.25);
+      white-space: nowrap;
+    }
+
+    /* 尺寸標注尺 */
+    .dimension-bar {
+      max-width: 900px;
+      margin: 0 auto 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .dim-line {
+      flex: 1;
+      height: 1px;
+      background: #9ca3af;
+      position: relative;
+    }
+    .dim-line::before,
+    .dim-line::after {
+      content: '';
+      position: absolute;
+      top: -4px;
+      width: 1px;
+      height: 9px;
+      background: #9ca3af;
+    }
+    .dim-line::before { left: 0; }
+    .dim-line::after  { right: 0; }
+    .dim-text {
+      font-size: 12px;
+      color: #6b7280;
+      white-space: nowrap;
+      font-weight: 600;
+    }
+
+    /* ── 規格標注區 ── */
+    .annotation-box {
+      max-width: 900px;
+      margin: 20px auto 0;
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px 28px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+    }
+    .annotation-box h2 {
+      font-size: 15px;
+      font-weight: 700;
+      color: #111;
+      margin-bottom: 14px;
+    }
+    .anno-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 600px) {
+      .anno-grid { grid-template-columns: 1fr; }
+    }
+    .anno-card {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 12px 16px;
+    }
+    .anno-card .label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+    .anno-card .value {
+      font-size: 14px;
+      font-weight: 600;
+      color: #111;
+      font-family: 'Fira Code', 'Courier New', monospace;
+    }
+    .anno-card .value.green { color: #15803d; }
+
+    footer {
+      text-align: center;
+      margin-top: 32px;
+      font-size: 12px;
+      color: #9ca3af;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 規格頁頭 -->
+  <div class="spec-header">
+    <h1>LINE Rich Menu 設計稿 — AcctAssist Sprint 2</h1>
+    <table class="spec-table">
+      <tr>
+        <th>專案</th>
+        <td>AcctAssist 報帳助理</td>
+      </tr>
+      <tr>
+        <th>版本</th>
+        <td>Sprint 2 / v1.0</td>
+      </tr>
+      <tr>
+        <th>尺寸規格</th>
+        <td><strong>2500 × 843 px</strong>（LINE 官方大型 Rich Menu 規範）</td>
+      </tr>
+      <tr>
+        <th>格線配置</th>
+        <td>全寬單格（1 × 1）</td>
+      </tr>
+      <tr>
+        <th>動作類型</th>
+        <td><span class="badge">Postback</span> &nbsp;data = <code>"action=confirm_submit"</code></td>
+      </tr>
+      <tr>
+        <th>說明</th>
+        <td>使用者點擊後觸發批次送出確認流程，不顯示文字泡泡</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- 預覽標籤 -->
+  <div class="preview-wrapper">
+    <div class="preview-label">設計預覽</div>
+    <div class="scale-note">※ 以下以等比例縮放顯示，實際輸出尺寸為 2500 × 843 px</div>
+  </div>
+
+  <!-- 尺寸標注（寬） -->
+  <div class="dimension-bar">
+    <div class="dim-line"></div>
+    <span class="dim-text">2500 px</span>
+    <div class="dim-line"></div>
+  </div>
+
+  <!-- Rich Menu 預覽本體 -->
+  <div class="preview-wrapper">
+    <div class="rich-menu-outer">
+      <div class="rich-menu-ratio">
+        <div class="rich-menu-inner">
+          <div class="rich-menu-cell">
+            <div class="check-icon">✅</div>
+            <div class="cell-label">確認送出</div>
+            <div class="action-badge">
+              Postback &nbsp;|&nbsp; data="action=confirm_submit"
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 規格標注卡片 -->
+  <div class="annotation-box">
+    <h2>技術標注</h2>
+    <div class="anno-grid">
+      <div class="anno-card">
+        <div class="label">畫布尺寸</div>
+        <div class="value">2500 × 843 px</div>
+      </div>
+      <div class="anno-card">
+        <div class="label">格線數量</div>
+        <div class="value">1 格（全寬）</div>
+      </div>
+      <div class="anno-card">
+        <div class="label">動作類型</div>
+        <div class="value green">Postback Action</div>
+      </div>
+      <div class="anno-card">
+        <div class="label">Postback Data</div>
+        <div class="value">action=confirm_submit</div>
+      </div>
+      <div class="anno-card">
+        <div class="label">顯示文字</div>
+        <div class="value">✅ 確認送出</div>
+      </div>
+      <div class="anno-card">
+        <div class="label">觸發後行為</div>
+        <div class="value">送出批次報帳確認，不顯示文字泡泡</div>
+      </div>
+      <div class="anno-card">
+        <div class="label">背景色</div>
+        <div class="value">#00a651（LINE 綠）</div>
+      </div>
+      <div class="anno-card">
+        <div class="label">圖片格式（上傳 LINE）</div>
+        <div class="value">JPEG，≤ 1 MB</div>
+      </div>
+    </div>
+  </div>
+
+  <footer>AcctAssist — Sprint 2 UI 設計稿 &nbsp;|&nbsp; 設計者：designer &nbsp;|&nbsp; 2026-04-10</footer>
+
+</body>
+</html>

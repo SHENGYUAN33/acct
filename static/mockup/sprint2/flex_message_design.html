@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flex Message 設計稿 — AcctAssist Sprint 2</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #e8eaf0;
+      font-family: 'Noto Sans TC', 'Microsoft JhengHei', sans-serif;
+      padding: 32px 16px;
+      min-height: 100vh;
+    }
+
+    /* ── 頁頭 ── */
+    .page-header {
+      max-width: 720px;
+      margin: 0 auto 28px;
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px 28px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+    }
+    .page-header h1 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #111;
+      margin-bottom: 6px;
+    }
+    .page-header p {
+      font-size: 13px;
+      color: #6b7280;
+      line-height: 1.6;
+    }
+
+    /* ── LINE 聊天室背景模擬 ── */
+    .chat-bg {
+      max-width: 480px;
+      margin: 0 auto;
+      background: #b2c8e0;
+      border-radius: 16px;
+      padding: 20px 14px 24px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.18);
+    }
+    .chat-header {
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 18px;
+      letter-spacing: 0.02em;
+    }
+
+    /* 大頭貼列（LINE Bot） */
+    .bot-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .bot-avatar {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #06c755 0%, #00a651 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    }
+    .bot-name {
+      font-size: 11px;
+      color: #fff;
+      font-weight: 600;
+      margin-bottom: 5px;
+    }
+
+    /* ── Flex Message 氣泡 ── */
+    .bubble {
+      background: #fff;
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 3px 14px rgba(0,0,0,0.14);
+      width: 100%;
+      max-width: 340px;
+    }
+
+    /* 氣泡頂部色條 */
+    .bubble-hero {
+      background: linear-gradient(135deg, #06c755 0%, #00a651 100%);
+      padding: 16px 18px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .hero-icon {
+      font-size: 26px;
+    }
+    .hero-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: #fff;
+      line-height: 1.2;
+    }
+    .hero-subtitle {
+      font-size: 11px;
+      color: rgba(255,255,255,0.8);
+      margin-top: 2px;
+    }
+
+    /* 氣泡內容區 */
+    .bubble-body {
+      padding: 0;
+    }
+
+    /* 憑證行列表 */
+    .voucher-section {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .section-title {
+      font-size: 10.5px;
+      font-weight: 700;
+      color: #9ca3af;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .voucher-row {
+      display: flex;
+      align-items: center;
+      padding: 7px 0;
+      border-bottom: 1px solid #f5f5f5;
+      gap: 8px;
+    }
+    .voucher-row:last-child {
+      border-bottom: none;
+    }
+
+    .v-icon {
+      font-size: 17px;
+      width: 24px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .v-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #111;
+      flex: 1;
+      min-width: 0;
+    }
+    .v-count {
+      font-size: 12px;
+      color: #6b7280;
+      background: #f3f4f6;
+      border-radius: 10px;
+      padding: 2px 8px;
+      white-space: nowrap;
+    }
+    .v-amount {
+      font-size: 13px;
+      font-weight: 700;
+      color: #111;
+      text-align: right;
+      min-width: 80px;
+      white-space: nowrap;
+    }
+    .v-amount.negative {
+      color: #dc2626;
+    }
+    .v-amount.no-amount {
+      font-size: 11px;
+      color: #9ca3af;
+      font-weight: 400;
+    }
+
+    /* 非憑證行標籤 */
+    .non-voucher-tag {
+      font-size: 9.5px;
+      color: #6b7280;
+      background: #f3f4f6;
+      border-radius: 4px;
+      padding: 1px 5px;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+
+    /* 合計行 */
+    .total-section {
+      padding: 12px 16px;
+      background: #f9fafb;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .total-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .total-label {
+      font-size: 13px;
+      font-weight: 700;
+      color: #374151;
+    }
+    .total-amount {
+      font-size: 20px;
+      font-weight: 800;
+      color: #06c755;
+    }
+    .total-note {
+      font-size: 10.5px;
+      color: #9ca3af;
+      margin-top: 3px;
+      text-align: right;
+    }
+
+    /* 詳情區 */
+    .detail-section {
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .detail-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .detail-key {
+      font-size: 11px;
+      color: #9ca3af;
+      font-weight: 600;
+      width: 58px;
+      flex-shrink: 0;
+      padding-top: 1px;
+    }
+    .detail-val {
+      font-size: 13px;
+      color: #111;
+      font-weight: 500;
+      flex: 1;
+      line-height: 1.4;
+    }
+    .detail-val.mono {
+      font-family: 'Fira Code', 'Courier New', monospace;
+      font-size: 12px;
+      color: #374151;
+    }
+    .badge-dept {
+      display: inline-block;
+      background: #dbeafe;
+      color: #1d4ed8;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 10px;
+      border-radius: 20px;
+    }
+
+    /* 氣泡底部按鈕 */
+    .bubble-footer {
+      border-top: 1px solid #f0f0f0;
+    }
+    .action-btn {
+      display: block;
+      width: 100%;
+      padding: 14px 16px;
+      background: #06c755;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 800;
+      text-align: center;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      border: none;
+      transition: background 0.15s;
+    }
+    .action-btn:hover {
+      background: #05b04a;
+    }
+    .action-btn-secondary {
+      display: block;
+      width: 100%;
+      padding: 12px 16px;
+      background: #fff;
+      color: #374151;
+      font-size: 13px;
+      font-weight: 600;
+      text-align: center;
+      cursor: pointer;
+      border: none;
+      border-top: 1px solid #f0f0f0;
+      transition: background 0.15s;
+    }
+    .action-btn-secondary:hover {
+      background: #f9fafb;
+    }
+
+    /* 時間戳 */
+    .timestamp {
+      text-align: right;
+      font-size: 10px;
+      color: rgba(255,255,255,0.7);
+      margin-top: 5px;
+      padding-right: 2px;
+    }
+
+    /* ── 規格標注 ── */
+    .annotation-box {
+      max-width: 720px;
+      margin: 28px auto 0;
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px 28px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.08);
+    }
+    .annotation-box h2 {
+      font-size: 15px;
+      font-weight: 700;
+      color: #111;
+      margin-bottom: 14px;
+    }
+    .anno-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    @media (max-width: 600px) {
+      .anno-grid { grid-template-columns: 1fr; }
+    }
+    .anno-card {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 10px 14px;
+    }
+    .anno-card .lbl {
+      font-size: 10.5px;
+      font-weight: 600;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 3px;
+    }
+    .anno-card .val {
+      font-size: 13px;
+      font-weight: 600;
+      color: #111;
+    }
+    .anno-card .val code {
+      font-family: 'Fira Code', 'Courier New', monospace;
+      font-size: 12px;
+      background: #f3f4f6;
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 32px;
+      font-size: 12px;
+      color: #9ca3af;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 頁頭 -->
+  <div class="page-header">
+    <h1>批次摘要 Flex Message 設計稿 — AcctAssist Sprint 2</h1>
+    <p>
+      模擬 LINE Flex Message 氣泡外觀，含全部憑證類型行、合計金額、組別、備註與案件編號。<br>
+      使用者完成批次上傳後，Bot 發送此訊息作為送出前的確認摘要。
+    </p>
+  </div>
+
+  <!-- LINE 聊天室模擬 -->
+  <div class="chat-bg">
+    <div class="chat-header">AcctAssist 報帳助理</div>
+
+    <div class="bot-row">
+      <!-- Bot 大頭貼 -->
+      <div>
+        <div class="bot-avatar">🧾</div>
+      </div>
+
+      <div style="flex: 1; min-width: 0;">
+        <div class="bot-name">AcctAssist</div>
+
+        <!-- Flex Message 氣泡 -->
+        <div class="bubble">
+
+          <!-- 頂部 Hero 區 -->
+          <div class="bubble-hero">
+            <div class="hero-icon">📊</div>
+            <div>
+              <div class="hero-title">批次報帳摘要</div>
+              <div class="hero-subtitle">請確認以下明細後送出</div>
+            </div>
+          </div>
+
+          <!-- 憑證類型行 -->
+          <div class="bubble-body">
+            <div class="voucher-section">
+              <div class="section-title">憑證明細</div>
+
+              <!-- 🧾 發票 -->
+              <div class="voucher-row">
+                <div class="v-icon">🧾</div>
+                <div class="v-name">發票</div>
+                <div class="v-count">× 3 張</div>
+                <div class="v-amount">NT$4,500</div>
+              </div>
+
+              <!-- 📋 收據 -->
+              <div class="voucher-row">
+                <div class="v-icon">📋</div>
+                <div class="v-name">收據</div>
+                <div class="v-count">× 2 張</div>
+                <div class="v-amount">NT$1,280</div>
+              </div>
+
+              <!-- 👤 勞報 -->
+              <div class="voucher-row">
+                <div class="v-icon">👤</div>
+                <div class="v-name">勞報單</div>
+                <div class="v-count">× 1 張</div>
+                <div class="v-amount">NT$6,000</div>
+              </div>
+
+              <!-- 🚌 交通 -->
+              <div class="voucher-row">
+                <div class="v-icon">🚌</div>
+                <div class="v-name">交通費</div>
+                <div class="v-count">× 4 張</div>
+                <div class="v-amount">NT$960</div>
+              </div>
+
+              <!-- ↩️ 退貨折讓 -->
+              <div class="voucher-row">
+                <div class="v-icon">↩️</div>
+                <div class="v-name">退貨折讓</div>
+                <div class="v-count">× 1 張</div>
+                <div class="v-amount negative">NT$-350</div>
+              </div>
+
+              <!-- 📦 品項照片（非憑證） -->
+              <div class="voucher-row">
+                <div class="v-icon">📦</div>
+                <div class="v-name">
+                  品項照片
+                  <span class="non-voucher-tag">非憑證</span>
+                </div>
+                <div class="v-count">× 5 張</div>
+                <div class="v-amount no-amount">不計金額</div>
+              </div>
+            </div>
+
+            <!-- 合計 -->
+            <div class="total-section">
+              <div class="total-row">
+                <div class="total-label">合計金額</div>
+                <div class="total-amount">NT$12,390</div>
+              </div>
+              <div class="total-note">（已扣除退貨折讓 NT$350）</div>
+            </div>
+
+            <!-- 詳情 -->
+            <div class="detail-section">
+              <div class="detail-row">
+                <div class="detail-key">所屬組別</div>
+                <div class="detail-val">
+                  <span class="badge-dept">攝影組</span>
+                </div>
+              </div>
+              <div class="detail-row">
+                <div class="detail-key">備　　註</div>
+                <div class="detail-val">2026年4月外景拍攝費用，含器材租借與交通</div>
+              </div>
+              <div class="detail-row">
+                <div class="detail-key">案件編號</div>
+                <div class="detail-val mono">PHT-2026-04-007</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 底部按鈕 -->
+          <div class="bubble-footer">
+            <button class="action-btn">✅ 確認送出</button>
+            <button class="action-btn-secondary">✏️ 重新編輯</button>
+          </div>
+        </div>
+
+        <!-- 時間戳 -->
+        <div class="timestamp">下午 06:36</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 規格標注 -->
+  <div class="annotation-box">
+    <h2>Flex Message 技術標注</h2>
+    <div class="anno-grid">
+      <div class="anno-card">
+        <div class="lbl">訊息類型</div>
+        <div class="val">Flex Message — Bubble 氣泡</div>
+      </div>
+      <div class="anno-card">
+        <div class="lbl">Alt Text（無法顯示時）</div>
+        <div class="val">批次報帳摘要，請開啟查看明細</div>
+      </div>
+      <div class="anno-card">
+        <div class="lbl">確認按鈕動作</div>
+        <div class="val"><code>Postback: action=confirm_submit</code></div>
+      </div>
+      <div class="anno-card">
+        <div class="lbl">重新編輯按鈕動作</div>
+        <div class="val"><code>Postback: action=edit_batch</code></div>
+      </div>
+      <div class="anno-card">
+        <div class="lbl">憑證類型（6 種）</div>
+        <div class="val">🧾發票、📋收據、👤勞報、🚌交通、↩️退貨折讓、📦品項照片</div>
+      </div>
+      <div class="anno-card">
+        <div class="lbl">退貨折讓顯示</div>
+        <div class="val">金額以紅色負數顯示，合計自動扣除</div>
+      </div>
+      <div class="anno-card">
+        <div class="lbl">品項照片備注</div>
+        <div class="val">標記「非憑證」，不列入金額合計</div>
+      </div>
+      <div class="anno-card">
+        <div class="lbl">案件編號格式</div>
+        <div class="val"><code>{組別縮寫}-{YYYY}-{MM}-{序號}</code></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>AcctAssist — Sprint 2 UI 設計稿 &nbsp;|&nbsp; 設計者：designer &nbsp;|&nbsp; 2026-04-10</footer>
+
+</body>
+</html>

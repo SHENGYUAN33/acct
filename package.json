@@ -1,0 +1,10 @@
+{
+  "name": "acct-assist-dev",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently --kill-others --names \"API,UI,TUNNEL\" --prefix-colors \"cyan.bold,green.bold,yellow.bold\" \"set PYTHONIOENCODING=utf-8 && uvicorn main:app --reload --host 0.0.0.0 --port 8000\" \"npm run dev --prefix frontend\" \"ngrok http 8000\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}

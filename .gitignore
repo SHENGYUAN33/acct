@@ -1,0 +1,48 @@
+# Environment
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Uploads / generated files
+uploads/
+maps/
+
+# IDE
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Alembic
+# (keep alembic/versions/ tracked in git)
+
+# Root dev tooling (concurrently)
+node_modules/
+package-lock.json
