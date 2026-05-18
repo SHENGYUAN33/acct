@@ -774,8 +774,7 @@ async function fetchPreview(bar, msgEl) {
   try {
     bar.style.width = '95%'
     msgEl.textContent = '取得分組預覽中...'
-    const origin = window.location.origin || ''
-    previewData = await apiGet(`${origin}/liff/sessions/${sessionId}/preview`)
+    previewData = await apiGet(`${API_BASE}/liff/sessions/${sessionId}/preview`)
     bar.style.width = '100%'
     setTimeout(() => {
       buildConfirmPage()
