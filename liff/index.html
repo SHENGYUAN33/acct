@@ -439,6 +439,7 @@ let lineUserId  = ''
 let sessionId   = ''
 let photos      = []  // { localId, file, preview, imageId, isVoucher, manuallySet, uploaded, error }
 let previewData = null  // GET /preview 回傳
+let isUploading = false
 
 // ════════════════════════════════
 //  DOM
@@ -515,8 +516,12 @@ async function apiGet(path) {
     headers: { 'X-Line-User-Id': lineUserId }
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || `HTTP ${res.status}`)
+    const body = await res.json().catch(() => ({ detail: res.statusText }))
+    const detail = Array.isArray(body.detail)
+      ? body.detail.map(e => e.msg || JSON.stringify(e)).join('; ')
+      : (body.detail || `HTTP ${res.status}`)
+    console.error(`[apiGet] ${path} → ${res.status}`, body)
+    throw new Error(detail)
   }
   return res.json()
 }
@@ -595,7 +600,7 @@ function renderPhotoGrid() {
       <img src="${photo.preview}" alt="">
       <div class="photo-seq">${idx + 1}</div>
       <button class="photo-remove" data-idx="${idx}">×</button>
-      ${photo.isVoucher === null ? `<div class="photo-detecting"><div class="mini-spin"></div><span>待上傳</span></div>` : ''}
+      ${photo.isVoucher === null && isUploading ? `<div class="photo-detecting"><div class="mini-spin"></div><span>辨識中</span></div>` : ''}
       ${typeBtnHtml}
     `
 
@@ -693,6 +698,7 @@ function onPointerUp() {
 // ════════════════════════════════
 async function startUpload() {
   if (!photos.length) return
+  isUploading = true
   btnUpload.disabled = true
   showStep(2)
 
@@ -758,6 +764,12 @@ async function startUpload() {
   }
 
   // 取得預覽分組
+  await fetchPreview(bar, msgEl)
+}
+
+async function fetchPreview(bar, msgEl) {
+  if (!bar) bar = document.getElementById('progress-bar')
+  if (!msgEl) msgEl = document.getElementById('processing-msg')
   try {
     bar.style.width = '95%'
     msgEl.textContent = '取得分組預覽中...'
@@ -768,7 +780,11 @@ async function startUpload() {
       showStep(3)
     }, 300)
   } catch (err) {
-    msgEl.textContent = '無法取得預覽：' + err.message
+    console.error('[preview] 失敗，sessionId=', sessionId, err)
+    msgEl.innerHTML = `
+      <span style="color:#ef4444">預覽失敗：${err.message}</span><br>
+      <button onclick="fetchPreview()" style="margin-top:10px;padding:8px 20px;background:#3b82f6;color:white;border:none;border-radius:8px;font-size:14px;cursor:pointer">重新取得預覽</button>
+    `
   }
 }
 
@@ -923,6 +939,7 @@ function updateStepBar(current) {
 async function resetAll() {
   photos            = []
   previewData       = null
+  isUploading       = false
   pDrag             = null
   Object.keys(groupDescriptions).forEach(k => delete groupDescriptions[k])
   document.getElementById('upload-status-list').innerHTML = ''
