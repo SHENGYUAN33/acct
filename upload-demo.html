@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AcctAssist 批次報帳 Demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f5f6fa;
+    color: #1a1a1a;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: #1a1a2e;
+    color: white;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header h1 { font-size: 17px; font-weight: 700; }
+  .demo-badge {
+    background: #f59e0b;
+    color: #1a1a1a;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+    letter-spacing: 0.5px;
+  }
+
+  /* ── Step bar ── */
+  .step-bar {
+    display: flex;
+    align-items: center;
+    padding: 14px 20px;
+    background: white;
+    border-bottom: 1px solid #e5e7eb;
+    gap: 0;
+  }
+  .step-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    font-size: 12px;
+    color: #9ca3af;
+  }
+  .step-item.active { color: #3b82f6; }
+  .step-item.done { color: #22c55e; }
+  .step-dot {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .step-item.active .step-dot { background: #3b82f6; color: white; }
+  .step-item.done .step-dot { background: #22c55e; color: white; }
+  .step-line {
+    flex: 1;
+    height: 2px;
+    background: #e5e7eb;
+    margin: 0 4px;
+  }
+  .step-line.done { background: #22c55e; }
+
+  /* ── Container ── */
+  .container {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 20px 16px 40px;
+  }
+
+  /* ── Upload area ── */
+  .upload-area {
+    border: 2px dashed #d1d5db;
+    border-radius: 14px;
+    padding: 36px 20px;
+    text-align: center;
+    background: white;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .upload-area:hover {
+    border-color: #3b82f6;
+    background: #f0f7ff;
+  }
+  .upload-icon { font-size: 44px; margin-bottom: 10px; }
+  .upload-area h3 { font-size: 16px; margin-bottom: 6px; }
+  .upload-area p { font-size: 13px; color: #6b7280; }
+
+  .hint-box {
+    background: #fffbeb;
+    border: 1px solid #fcd34d;
+    border-radius: 10px;
+    padding: 11px 14px;
+    margin-top: 14px;
+    font-size: 13px;
+    color: #92400e;
+    line-height: 1.5;
+  }
+
+  /* ── Photo grid ── */
+  .section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .count-badge {
+    background: #3b82f6;
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 9px;
+    border-radius: 20px;
+  }
+  .drag-hint {
+    font-size: 11px;
+    color: #9ca3af;
+    font-weight: 400;
+  }
+
+  .photo-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  @media (min-width: 480px) {
+    .photo-grid { grid-template-columns: repeat(4, 1fr); }
+  }
+
+  .photo-item {
+    position: relative;
+    aspect-ratio: 1;
+    border-radius: 10px;
+    overflow: hidden;
+    user-select: none;
+    touch-action: none;   /* 關鍵：讓 pointer events 接管，不走瀏覽器原生 touch */
+    -webkit-user-select: none;
+    cursor: grab;
+  }
+  .photo-item:active { cursor: grabbing; }
+  .photo-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+    display: block;
+  }
+
+  /* 序號 */
+  .photo-seq {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    background: rgba(0,0,0,0.65);
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 22px;
+    height: 22px;
+    border-radius: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 5px;
+  }
+
+  /* 刪除按鈕：手機加大觸控範圍 */
+  .photo-remove {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: rgba(220,38,38,0.85);
+    color: white;
+    border: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 0 10px 0 10px;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-bottom: 2px;
+  }
+
+  /* 憑證 / 物品照 toggle：手機加大觸控範圍 */
+  .photo-type-btn {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    border: none;
+    border-radius: 0 0 10px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 5px 0;
+    cursor: pointer;
+    text-align: center;
+    transition: background 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+  }
+  .photo-type-btn.voucher      { background: rgba(29,78,216,0.92); color: #fff; }
+  .photo-type-btn.item         { background: rgba(75,85,99,0.85);  color: #fff; }
+  .photo-type-btn.manual-badge::after {
+    content: '✎';
+    font-size: 10px;
+    opacity: 0.9;
+  }
+
+  /* OCR detecting overlay */
+  .photo-detecting {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    gap: 5px;
+    pointer-events: none;
+  }
+  .photo-detecting .mini-spin {
+    width: 20px;
+    height: 20px;
+    border: 2.5px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  .photo-detecting span {
+    color: white;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  /* 拖曳浮動 clone */
+  #drag-clone {
+    position: fixed;
+    pointer-events: none;
+    z-index: 9999;
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+    transform: scale(1.08);
+    opacity: 0.92;
+    transition: none;
+  }
+
+  .photo-item.is-dragging { opacity: 0.25; }
+  .photo-item.drag-over   { outline: 3px solid #3b82f6; border-radius: 10px; }
+
+  .add-more-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    padding: 11px;
+    border: 2px dashed #d1d5db;
+    border-radius: 8px;
+    background: none;
+    color: #6b7280;
+    font-size: 13px;
+    cursor: pointer;
+    margin-top: 8px;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .add-more-btn:hover { border-color: #3b82f6; color: #3b82f6; }
+
+  /* ── Buttons ── */
+  .btn {
+    display: block;
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+    font-family: inherit;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary { background: #3b82f6; color: white; }
+  .btn-primary:not(:disabled):hover { background: #2563eb; }
+  .btn-success { background: #16a34a; color: white; }
+  .btn-success:not(:disabled):hover { background: #15803d; }
+  .btn-ghost {
+    background: #f3f4f6;
+    color: #374151;
+    border: 1px solid #e5e7eb;
+  }
+
+  /* ── Processing ── */
+  .processing {
+    text-align: center;
+    padding: 70px 20px;
+  }
+  .spinner {
+    width: 52px;
+    height: 52px;
+    border: 4px solid #e5e7eb;
+    border-top-color: #3b82f6;
+    border-radius: 50%;
+    animation: spin 0.75s linear infinite;
+    margin: 0 auto 20px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .processing h3 { font-size: 17px; margin-bottom: 8px; }
+  .processing p { color: #6b7280; font-size: 14px; }
+  .progress-bar-wrap {
+    width: 100%;
+    background: #e5e7eb;
+    border-radius: 99px;
+    height: 6px;
+    margin-top: 20px;
+    overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%;
+    background: #3b82f6;
+    border-radius: 99px;
+    width: 0%;
+    transition: width 0.4s ease;
+  }
+
+  /* ── Expense cards ── */
+  .confirm-banner {
+    background: #f0fdf4;
+    border: 1px solid #86efac;
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: #166534;
+    line-height: 1.5;
+  }
+
+  .expense-card {
+    background: white;
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+    border: 1px solid #f3f4f6;
+  }
+  .expense-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .expense-num-badge {
+    font-size: 12px;
+    font-weight: 700;
+    color: #3b82f6;
+    background: #eff6ff;
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+  .expense-meta {
+    font-size: 13px;
+    color: #6b7280;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .expense-amount {
+    font-weight: 700;
+    color: #111827;
+    font-size: 14px;
+  }
+
+  .expense-photos {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .expense-photo-wrap {
+    position: relative;
+    flex-shrink: 0;
+  }
+  .expense-photo {
+    width: 66px;
+    height: 66px;
+    border-radius: 8px;
+    object-fit: cover;
+    display: block;
+    border: 1px solid #e5e7eb;
+  }
+  .voucher-tag {
+    position: absolute;
+    bottom: 3px;
+    left: 3px;
+    background: #3b82f6;
+    color: white;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  .note-toggle-btn {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: 1.5px dashed #d1d5db;
+    color: #6b7280;
+    font-size: 13px;
+    padding: 9px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .note-toggle-btn:hover { border-color: #3b82f6; color: #3b82f6; }
+
+  .note-input {
+    width: 100%;
+    border: 1.5px solid #d1d5db;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    resize: none;
+    font-family: inherit;
+    color: #111827;
+    transition: border-color 0.2s;
+  }
+  .note-input:focus { outline: none; border-color: #3b82f6; }
+
+  /* ── Success ── */
+  .success-screen {
+    text-align: center;
+    padding: 40px 10px;
+  }
+  .success-icon { font-size: 64px; margin-bottom: 14px; }
+  .success-screen h2 { font-size: 22px; margin-bottom: 8px; }
+  .success-screen p { color: #6b7280; font-size: 14px; }
+
+  .serial-list {
+    background: white;
+    border-radius: 12px;
+    padding: 4px 16px;
+    margin: 20px 0;
+    text-align: left;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+  }
+  .serial-item {
+    padding: 11px 0;
+    border-bottom: 1px solid #f3f4f6;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .serial-item:last-child { border-bottom: none; }
+  .serial-code {
+    font-family: 'Courier New', monospace;
+    font-weight: 700;
+    font-size: 13px;
+    color: #1a1a2e;
+    flex: 1;
+  }
+  .serial-status {
+    font-size: 11px;
+    color: #f59e0b;
+    background: #fef9ec;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-weight: 600;
+  }
+
+  /* ── Utilities ── */
+  .hidden { display: none !important; }
+  .mt-14 { margin-top: 14px; }
+  .mt-20 { margin-top: 20px; }
+  .mt-24 { margin-top: 24px; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <h1>📋 AcctAssist 批次報帳</h1>
+  <span class="demo-badge">DEMO</span>
+</div>
+
+<!-- Step bar -->
+<div class="step-bar" id="step-bar">
+  <div class="step-item active" id="si-1">
+    <div class="step-dot">1</div>
+    <span>選取照片</span>
+  </div>
+  <div class="step-line" id="sl-1"></div>
+  <div class="step-item" id="si-2">
+    <div class="step-dot">2</div>
+    <span>辨識中</span>
+  </div>
+  <div class="step-line" id="sl-2"></div>
+  <div class="step-item" id="si-3">
+    <div class="step-dot">3</div>
+    <span>確認分組</span>
+  </div>
+  <div class="step-line" id="sl-3"></div>
+  <div class="step-item" id="si-4">
+    <div class="step-dot">4</div>
+    <span>完成</span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- ══════════ STEP 1: Select ══════════ -->
+  <div id="step-1">
+    <div class="upload-area" id="upload-trigger">
+      <div class="upload-icon">🖼️</div>
+      <h3>點擊選取照片</h3>
+      <p>支援一次選取多張</p>
+      <input type="file" id="file-input" multiple accept="image/*" style="display:none">
+    </div>
+
+    <div class="hint-box">
+      💡 <strong>選取小技巧：</strong>請依報帳順序選取，<strong>憑證照放在對應物品照前面</strong>。系統會自動辨識每張類型，如有辨識錯誤可手動點擊修正
+    </div>
+
+    <div id="photo-grid-section" class="hidden mt-20">
+      <div class="section-title">
+        已選照片
+        <span class="count-badge" id="photo-count">0</span>
+        <span class="drag-hint">✦ 長按縮圖可拖曳調整順序</span>
+      </div>
+      <div class="photo-grid" id="photo-grid"></div>
+      <button class="add-more-btn" id="add-more-btn">＋ 新增更多照片</button>
+    </div>
+
+    <div class="mt-24">
+      <button class="btn btn-primary" id="btn-upload" disabled>送出上傳</button>
+    </div>
+  </div>
+
+  <!-- ══════════ STEP 2: Processing ══════════ -->
+  <div id="step-2" class="hidden">
+    <div class="processing">
+      <div class="spinner"></div>
+      <h3>處理中</h3>
+      <p id="processing-msg">正在上傳照片...</p>
+      <div class="progress-bar-wrap mt-20">
+        <div class="progress-bar" id="progress-bar"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ STEP 3: Confirm ══════════ -->
+  <div id="step-3" class="hidden">
+    <div class="confirm-banner">
+      ✅ 系統已將照片辨識為 <strong id="expense-count-text">0</strong> 筆費用，請確認分組是否正確，並視需要填寫備注
+    </div>
+    <div id="expense-cards"></div>
+    <div class="mt-24">
+      <button class="btn btn-success" id="btn-confirm">全部確認送出</button>
+    </div>
+  </div>
+
+  <!-- ══════════ STEP 4: Success ══════════ -->
+  <div id="step-4" class="hidden">
+    <div class="success-screen">
+      <div class="success-icon">🎉</div>
+      <h2>報帳完成！</h2>
+      <p>以下費用已送出，等待審核</p>
+      <div class="serial-list" id="serial-list"></div>
+      <button class="btn btn-ghost" onclick="resetAll()">繼續報帳</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ════════════════════════════════════
+//  State
+// ════════════════════════════════════
+let photos   = []   // { id, file, preview }
+let expenses = []   // { id, photos[], merchant, amount, description, showNote }
+// dragSrcIdx 已由 pDrag 取代（Pointer Events）
+
+const MERCHANTS = ['統一超商', '全聯福利中心', '全家便利商店', '計程車費', '麥當勞', '台鐵票務', '停車費', '文具用品']
+
+// ════════════════════════════════════
+//  DOM refs
+// ════════════════════════════════════
+const fileInput       = document.getElementById('file-input')
+const uploadTrigger   = document.getElementById('upload-trigger')
+const addMoreBtn      = document.getElementById('add-more-btn')
+const photoGrid       = document.getElementById('photo-grid')
+const photoGridSection = document.getElementById('photo-grid-section')
+const photoCountEl    = document.getElementById('photo-count')
+const btnUpload       = document.getElementById('btn-upload')
+const btnConfirm      = document.getElementById('btn-confirm')
+
+// ════════════════════════════════════
+//  Init
+// ════════════════════════════════════
+uploadTrigger.addEventListener('click', () => fileInput.click())
+addMoreBtn.addEventListener('click',    () => fileInput.click())
+fileInput.addEventListener('change', handleFileSelect)
+btnUpload.addEventListener('click',  startProcessing)
+btnConfirm.addEventListener('click', confirmSubmit)
+
+// ════════════════════════════════════
+//  Step 1 — File Select
+// ════════════════════════════════════
+function handleFileSelect(e) {
+  const files = Array.from(e.target.files)
+  if (!files.length) return
+
+  const incoming = files.map(file => ({
+    id:          crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+    file,
+    preview:     URL.createObjectURL(file),
+    isVoucher:   true,    // 預設值，OCR 模擬後覆蓋
+    detecting:   true,    // OCR 辨識中
+    manuallySet: false    // 是否被使用者手動覆蓋
+  }))
+
+  photos = [...photos, ...incoming]
+  fileInput.value = ''
+  renderPhotoGrid()
+
+  // 模擬 OCR 辨識：每張照片以 0.4s 間隔逐張完成（真實版為後端 Gemini OCR 回傳）
+  const startIdx = photos.length - incoming.length
+  incoming.forEach((_, i) => {
+    setTimeout(() => {
+      const photo = photos[startIdx + i]
+      if (!photo) return
+      // Demo 模擬：前 N 張預設憑證（真實版由 OCR is_voucher 決定）
+      photo.isVoucher = true
+      photo.detecting = false
+      renderPhotoGrid()
+    }, (i + 1) * 420)
+  })
+}
+
+function renderPhotoGrid() {
+  const hasPhotos = photos.length > 0
+  photoGridSection.classList.toggle('hidden', !hasPhotos)
+  const stillDetecting = photos.some(p => p.detecting)
+  btnUpload.disabled   = !hasPhotos || stillDetecting
+  btnUpload.textContent = stillDetecting ? '辨識中，請稍候...' : '送出上傳'
+  if (!hasPhotos) return
+
+  photoCountEl.textContent = photos.length
+  photoGrid.innerHTML = ''
+
+  photos.forEach((photo, idx) => {
+    const el = document.createElement('div')
+    el.className   = 'photo-item'
+    el.draggable   = false  // 用 Pointer Events，不用 HTML5 DnD
+    el.dataset.idx = idx
+
+    const typeLabel   = photo.isVoucher ? '憑證' : '物品照'
+    const typeCls     = photo.isVoucher ? 'voucher' : 'item'
+    const manualCls   = photo.manuallySet ? 'manual-badge' : ''
+    const detectingHtml = photo.detecting
+      ? `<div class="photo-detecting"><div class="mini-spin"></div><span>辨識中</span></div>`
+      : ''
+
+    el.innerHTML = `
+      <img src="${photo.preview}" alt="">
+      <div class="photo-seq">${idx + 1}</div>
+      <button class="photo-remove" data-idx="${idx}" title="移除">×</button>
+      ${detectingHtml}
+      ${!photo.detecting ? `<button class="photo-type-btn ${typeCls} ${manualCls}" data-idx="${idx}">${typeLabel}</button>` : ''}
+    `
+
+    // Pointer Events 拖曳（桌機 + 手機通用）
+    el.addEventListener('pointerdown',   e => onPointerDown(e, idx))
+    el.addEventListener('pointermove',   onPointerMove)
+    el.addEventListener('pointerup',     onPointerUp)
+    el.addEventListener('pointercancel', onPointerUp)
+
+    // Remove button
+    el.querySelector('.photo-remove').addEventListener('click', ev => {
+      ev.stopPropagation()
+      photos.splice(+ev.currentTarget.dataset.idx, 1)
+      renderPhotoGrid()
+    })
+
+    // Toggle 憑證 / 物品照（手動覆蓋）
+    const typeBtn = el.querySelector('.photo-type-btn')
+    if (typeBtn) {
+      typeBtn.addEventListener('click', ev => {
+        ev.stopPropagation()
+        const i = +ev.currentTarget.dataset.idx
+        photos[i].isVoucher   = !photos[i].isVoucher
+        photos[i].manuallySet = true
+        renderPhotoGrid()
+      })
+    }
+
+    photoGrid.appendChild(el)
+  })
+}
+
+// ════════════════════════════════════
+//  Drag & Drop（Pointer Events — 桌機 + 手機通用）
+// ════════════════════════════════════
+let pDrag = null  // { sourceIdx, targetIdx, el, clone, offsetX, offsetY, moved }
+const DRAG_THRESHOLD = 8  // px，超過才進入拖曳模式
+
+function onPointerDown(e, idx) {
+  // 點到按鈕時不啟動拖曳
+  if (e.target.closest('.photo-remove') || e.target.closest('.photo-type-btn')) return
+  const el   = e.currentTarget
+  const rect = el.getBoundingClientRect()
+  pDrag = {
+    sourceIdx: idx,
+    targetIdx: idx,
+    el,
+    startX:   e.clientX,
+    startY:   e.clientY,
+    offsetX:  e.clientX - rect.left,
+    offsetY:  e.clientY - rect.top,
+    clone:    null,
+    moved:    false
+  }
+  el.setPointerCapture(e.pointerId)
+}
+
+function onPointerMove(e) {
+  if (!pDrag) return
+  const dx = e.clientX - pDrag.startX
+  const dy = e.clientY - pDrag.startY
+
+  // 尚未超過門檻 → 還沒進入拖曳模式
+  if (!pDrag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+
+  e.preventDefault()
+
+  // 第一次超過門檻：建立浮動 clone
+  if (!pDrag.moved) {
+    pDrag.moved = true
+    const rect  = pDrag.el.getBoundingClientRect()
+    const clone = pDrag.el.cloneNode(true)
+    clone.id    = 'drag-clone'
+    clone.style.width  = rect.width  + 'px'
+    clone.style.height = rect.height + 'px'
+    clone.style.left   = rect.left   + 'px'
+    clone.style.top    = rect.top    + 'px'
+    document.body.appendChild(clone)
+    pDrag.clone = clone
+    pDrag.el.classList.add('is-dragging')
+  }
+
+  // 移動 clone
+  pDrag.clone.style.left = (e.clientX - pDrag.offsetX) + 'px'
+  pDrag.clone.style.top  = (e.clientY - pDrag.offsetY) + 'px'
+
+  // 找最近的 photo-item
+  let bestDist = Infinity, bestIdx = pDrag.sourceIdx
+  document.querySelectorAll('.photo-item').forEach(item => {
+    item.classList.remove('drag-over')
+    const r  = item.getBoundingClientRect()
+    const cx = r.left + r.width  / 2
+    const cy = r.top  + r.height / 2
+    const d  = Math.hypot(e.clientX - cx, e.clientY - cy)
+    if (d < bestDist) { bestDist = d; bestIdx = +item.dataset.idx }
+  })
+  pDrag.targetIdx = bestIdx
+  if (bestIdx !== pDrag.sourceIdx) {
+    const target = document.querySelector(`.photo-item[data-idx="${bestIdx}"]`)
+    if (target) target.classList.add('drag-over')
+  }
+}
+
+function onPointerUp() {
+  if (!pDrag) return
+  if (pDrag.clone) pDrag.clone.remove()
+  pDrag.el.classList.remove('is-dragging')
+  document.querySelectorAll('.photo-item').forEach(i => i.classList.remove('drag-over', 'is-dragging'))
+
+  if (pDrag.moved && pDrag.sourceIdx !== pDrag.targetIdx) {
+    const [moved] = photos.splice(pDrag.sourceIdx, 1)
+    photos.splice(pDrag.targetIdx, 0, moved)
+    renderPhotoGrid()
+  }
+  pDrag = null
+}
+
+// ════════════════════════════════════
+//  Step 2 — Processing (simulated)
+// ════════════════════════════════════
+function startProcessing() {
+  showStep(2)
+
+  const msgs = [
+    '正在上傳照片...',
+    '上傳完成，辨識憑證中...',
+    '自動分組中...',
+    '即將完成...'
+  ]
+  const bar  = document.getElementById('progress-bar')
+  const msgEl = document.getElementById('processing-msg')
+  const steps = [15, 45, 75, 95]
+
+  msgs.forEach((msg, i) => {
+    setTimeout(() => {
+      msgEl.textContent   = msg
+      bar.style.width     = steps[i] + '%'
+    }, i * 650)
+  })
+
+  setTimeout(() => {
+    bar.style.width = '100%'
+    setTimeout(() => {
+      simulateAutoSplit()
+      renderExpenseCards()
+      showStep(3)
+    }, 300)
+  }, msgs.length * 650 + 200)
+}
+
+// ════════════════════════════════════
+//  Auto-split simulation
+//  Real system: OCR detects is_voucher → split at boundaries
+//  Demo:  split every ceil(n/groups) photos into one expense
+// ════════════════════════════════════
+function simulateAutoSplit() {
+  expenses = []
+
+  // 真實邏輯：每遇到一張「憑證」就開一筆新費用
+  // 物品照附加到前一筆；若第一張就是物品照，先建一個暫存組等待憑證
+  let currentGroup = []
+
+  photos.forEach((photo) => {
+    if (photo.isVoucher) {
+      // 憑證 → 前一組收尾（若有），開新組
+      if (currentGroup.length > 0) {
+        pushExpense(currentGroup)
+      }
+      currentGroup = [photo]
+    } else {
+      // 物品照 → 掛到當前組；若還沒有任何組就先暫存
+      currentGroup.push(photo)
+    }
+  })
+
+  // 最後一組收尾
+  if (currentGroup.length > 0) {
+    pushExpense(currentGroup)
+  }
+
+  // 若完全沒有憑證，整批視為一筆
+  if (expenses.length === 0 && photos.length > 0) {
+    pushExpense(photos)
+  }
+
+  document.getElementById('expense-count-text').textContent = expenses.length
+}
+
+function pushExpense(group) {
+  expenses.push({
+    id:          crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+    photos:      [...group],
+    merchant:    MERCHANTS[Math.floor(Math.random() * MERCHANTS.length)],
+    amount:      Math.floor(Math.random() * 1600) + 150,
+    description: '',
+    showNote:    false
+  })
+}
+
+// ════════════════════════════════════
+//  Step 3 — Expense Cards
+// ════════════════════════════════════
+function renderExpenseCards() {
+  const container = document.getElementById('expense-cards')
+  container.innerHTML = ''
+
+  expenses.forEach((exp, idx) => {
+    const photosHtml = exp.photos.map((p, pi) => `
+      <div class="expense-photo-wrap">
+        <img src="${p.preview}" class="expense-photo" alt="">
+        ${pi === 0 ? '<span class="voucher-tag">憑證</span>' : ''}
+      </div>
+    `).join('')
+
+    const card = document.createElement('div')
+    card.className = 'expense-card'
+    card.id = `card-${exp.id}`
+    card.innerHTML = `
+      <div class="expense-card-header">
+        <span class="expense-num-badge">第 ${idx + 1} 筆</span>
+        <div class="expense-meta">
+          <span>${exp.merchant}</span>
+          <span class="expense-amount">$${exp.amount.toLocaleString()}</span>
+        </div>
+      </div>
+      <div class="expense-photos">${photosHtml}</div>
+      <div id="note-area-${exp.id}">
+        <button class="note-toggle-btn" onclick="openNote('${exp.id}')">
+          ＋ 新增備注（選填）
+        </button>
+      </div>
+    `
+    container.appendChild(card)
+  })
+}
+
+function openNote(expId) {
+  const exp  = expenses.find(e => e.id === expId)
+  if (!exp) return
+  exp.showNote = true
+  const area = document.getElementById(`note-area-${expId}`)
+  area.innerHTML = `
+    <textarea
+      class="note-input"
+      rows="2"
+      placeholder="輸入這筆費用的備注說明（選填）"
+      oninput="saveNote('${expId}', this.value)"
+    >${exp.description}</textarea>
+  `
+  area.querySelector('textarea').focus()
+}
+
+function saveNote(expId, val) {
+  const exp = expenses.find(e => e.id === expId)
+  if (exp) exp.description = val
+}
+
+// ════════════════════════════════════
+//  Step 4 — Confirm & Success
+// ════════════════════════════════════
+function confirmSubmit() {
+  btnConfirm.disabled     = true
+  btnConfirm.textContent  = '送出中...'
+
+  setTimeout(() => {
+    const now    = new Date()
+    const ym     = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2,'0')}`
+    const used   = new Set()
+
+    const serials = expenses.map(() => {
+      let n
+      do { n = Math.floor(1000 + Math.random() * 9000) } while (used.has(n))
+      used.add(n)
+      return `EXP-${ym}-${String(n).padStart(4,'0')}`
+    })
+
+    const list = document.getElementById('serial-list')
+    list.innerHTML = serials.map((s, i) => `
+      <div class="serial-item">
+        <span style="color:#22c55e;font-size:15px">✓</span>
+        <span class="serial-code">${s}</span>
+        <span class="serial-status">審核中</span>
+      </div>
+    `).join('')
+
+    showStep(4)
+  }, 1000)
+}
+
+// ════════════════════════════════════
+//  Navigation
+// ════════════════════════════════════
+function showStep(n) {
+  [1, 2, 3, 4].forEach(i => {
+    document.getElementById(`step-${i}`).classList.toggle('hidden', i !== n)
+  })
+  updateStepBar(n)
+}
+
+function updateStepBar(current) {
+  [1, 2, 3, 4].forEach(i => {
+    const si = document.getElementById(`si-${i}`)
+    si.classList.remove('active', 'done')
+    if (i < current)       si.classList.add('done')
+    else if (i === current) si.classList.add('active')
+  })
+  ;[1, 2, 3].forEach(i => {
+    const sl = document.getElementById(`sl-${i}`)
+    sl.classList.toggle('done', i < current)
+  })
+}
+
+function resetAll() {
+  photos   = []
+  expenses = []
+  pDrag = null
+  renderPhotoGrid()
+  btnConfirm.disabled    = false
+  btnConfirm.textContent = '全部確認送出'
+  document.getElementById('progress-bar').style.width = '0%'
+  showStep(1)
+}
+</script>
+</body>
+</html>
