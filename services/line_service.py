@@ -27,6 +27,7 @@ from linebot.v3.messaging import (
     QuickReplyItem,
     ReplyMessageRequest,
     TextMessage,
+    URIAction,
 )
 from sqlalchemy.orm import Session
 
@@ -144,7 +145,8 @@ def push_reject_notification(
         )
 
 
-_RICH_MENU_NAME = "AcctAssist Main Menu v4 (Sprint2)"
+_RICH_MENU_NAME = "AcctAssist Main Menu v5 (LIFF)"
+_LIFF_URL = "https://liff.line.me/2010115806-blToY7nZ"
 _RICH_MENU_IMAGE_PATH = Path(__file__).parent.parent / "static" / "mockup" / "sprint2" / "rich_menu.jpg"
 
 
@@ -159,11 +161,11 @@ def setup_rich_menu() -> str:
     回傳 rich_menu_id。
     """
     from linebot.v3.messaging import (
-        PostbackAction,
         RichMenuArea,
         RichMenuBounds,
         RichMenuRequest,
         RichMenuSize,
+        URIAction as _URIAction,
     )
 
     with ApiClient(_line_config) as api_client:
@@ -199,13 +201,13 @@ def setup_rich_menu() -> str:
             size=RichMenuSize(width=W, height=H),
             selected=True,
             name=_RICH_MENU_NAME,
-            chat_bar_text="確認送出",
+            chat_bar_text="開始報帳",
             areas=[
                 RichMenuArea(
                     bounds=RichMenuBounds(x=0, y=0, width=W, height=H),
-                    action=PostbackAction(
-                        label="✅ 確認送出",
-                        data="action=confirm_submit",
+                    action=_URIAction(
+                        label="開始報帳",
+                        uri=_LIFF_URL,
                     ),
                 ),
             ],
