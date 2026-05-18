@@ -1,0 +1,233 @@
+"""LIFF 批次上傳 API 路由。
+
+端點清單：
+  POST   /liff/sessions                              — 建立上傳 Session
+  POST   /liff/sessions/{session_id}/images          — 上傳單張圖片（multipart）
+  PATCH  /liff/sessions/{session_id}/images/{img_id} — 手動切換憑證/物品照類型
+  GET    /liff/sessions/{session_id}/preview         — 確認頁群組預覽
+  POST   /liff/sessions/{session_id}/submit          — 確認送出，建立 Expense
+
+認證方式：X-Line-User-Id header（由 LIFF 前端帶入 liff.getProfile().userId）
+"""
+
+import logging
+import uuid
+
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
+from sqlalchemy.orm import Session
+
+from core.database import get_db
+from schemas.liff import (
+    CreateSessionRequest,
+    ImageResponse,
+    ImageUploadResponse,
+    PatchImageRequest,
+    SessionPreviewResponse,
+    SessionResponse,
+    SubmitSessionRequest,
+    SubmitSessionResponse,
+)
+from services import liff_service
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(
+    prefix="/liff",
+    tags=["liff"],
+)
+
+
+# ---------------------------------------------------------------------------
+# 共用 dependency：從 Header 取得 LINE User ID
+# ---------------------------------------------------------------------------
+
+def get_line_user_id(
+    x_line_user_id: str | None = Header(default=None, alias="X-Line-User-Id"),
+) -> str:
+    """
+    從請求 Header 取得 LINE 使用者 ID。
+
+    LIFF 前端需在每個請求帶入：
+        X-Line-User-Id: {liff.getProfile().userId}
+    """
+    if not x_line_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="缺少 X-Line-User-Id header，請透過 LIFF 頁面呼叫此 API",
+        )
+    return x_line_user_id
+
+
+# ---------------------------------------------------------------------------
+# POST /liff/sessions — 建立 Session
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/sessions",
+    response_model=SessionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="建立 LIFF 上傳 Session",
+)
+def create_session(
+    body: CreateSessionRequest,
+    db: Session = Depends(get_db),
+) -> SessionResponse:
+    """
+    建立一個新的上傳 Session（TTL 30 分鐘）。
+
+    前端在使用者進入 LIFF 頁面後立即呼叫，取得 session_id 供後續圖片上傳使用。
+    """
+    session = liff_service.create_session(db, body.line_user_id)
+    return SessionResponse(
+        session_id=session.id,
+        expires_at=session.expires_at,
+        status=session.status,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /liff/sessions/{session_id}/images — 上傳單張圖片
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/sessions/{session_id}/images",
+    response_model=ImageUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="上傳單張圖片至 Session",
+)
+async def upload_image(
+    session_id: uuid.UUID,
+    file: UploadFile = File(..., description="圖片檔案"),
+    sequence_order: int = Form(..., description="前端凍結的排列順序（0-based）"),
+    line_user_id: str = Depends(get_line_user_id),
+    db: Session = Depends(get_db),
+) -> ImageUploadResponse:
+    """
+    上傳單張圖片至指定 Session，並同步執行 OCR 辨識（classify_and_extract_with_retry）。
+
+    **重要**：sequence_order 由前端在使用者按下「送出」瞬間 Object.freeze() 凍結，
+    後端永遠以此欄位排序，與圖片到達時間無關。
+    """
+    # 驗證 content type
+    if file.content_type and not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"不支援的檔案類型：{file.content_type}，請上傳圖片檔",
+        )
+
+    img_record, ocr_completed, is_voucher = await liff_service.add_image(
+        db=db,
+        session_id=session_id,
+        upload_file=file,
+        sequence_order=sequence_order,
+    )
+
+    return ImageUploadResponse(
+        image=ImageResponse(
+            image_id=img_record.id,
+            sequence_order=img_record.sequence_order,
+            image_path=img_record.image_path,
+            is_voucher=img_record.is_voucher,
+            manually_set=img_record.manually_set,
+        ),
+        ocr_completed=ocr_completed,
+        is_voucher=is_voucher,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PATCH /liff/sessions/{session_id}/images/{image_id} — 手動切換類型
+# ---------------------------------------------------------------------------
+
+@router.patch(
+    "/sessions/{session_id}/images/{image_id}",
+    response_model=ImageResponse,
+    summary="手動切換圖片類型（憑證 / 物品照）",
+)
+def patch_image(
+    session_id: uuid.UUID,
+    image_id: uuid.UUID,
+    body: PatchImageRequest,
+    line_user_id: str = Depends(get_line_user_id),
+    db: Session = Depends(get_db),
+) -> ImageResponse:
+    """
+    使用者在確認頁手動切換 is_voucher 類型。
+
+    manually_set=True 後，此圖片的分組判斷優先於 OCR 結果。
+    """
+    img = liff_service.patch_image_type(
+        db=db,
+        session_id=session_id,
+        image_id=image_id,
+        is_voucher=body.is_voucher,
+    )
+    return ImageResponse(
+        image_id=img.id,
+        sequence_order=img.sequence_order,
+        image_path=img.image_path,
+        is_voucher=img.is_voucher,
+        manually_set=img.manually_set,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /liff/sessions/{session_id}/preview — 確認頁預覽
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/sessions/{session_id}/preview",
+    response_model=SessionPreviewResponse,
+    summary="取得 Session 費用群組預覽",
+)
+def get_preview(
+    session_id: uuid.UUID,
+    line_user_id: str = Depends(get_line_user_id),
+    db: Session = Depends(get_db),
+) -> SessionPreviewResponse:
+    """
+    依 sequence_order ASC 重建費用群組預覽，供確認頁渲染。
+
+    群組切割規則：
+    - is_voucher=True 的圖片作為每個費用群組的起點
+    - 第一張 voucher 之前的物品圖歸入 orphan_images（將關聯至最近的報帳）
+    """
+    return liff_service.get_session_preview(db=db, session_id=session_id)
+
+
+# ---------------------------------------------------------------------------
+# POST /liff/sessions/{session_id}/submit — 確認送出
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/sessions/{session_id}/submit",
+    response_model=SubmitSessionResponse,
+    summary="確認送出，建立費用報帳記錄",
+)
+async def submit_session(
+    session_id: uuid.UUID,
+    body: SubmitSessionRequest,
+    line_user_id: str = Depends(get_line_user_id),
+    db: Session = Depends(get_db),
+) -> SubmitSessionResponse:
+    """
+    鎖定 Session（status → submitted）並依群組建立 Expense 記錄。
+
+    流程：
+    1. 標記 session.status = "submitted"（防止重複送出）
+    2. 對 is_voucher=None 的圖片補跑 OCR
+    3. multi_split_logic_v2 依 sequence_order 切割群組
+    4. 每個群組呼叫 create_batch_expense(trigger_by="liff")
+    5. 孤立物品圖嘗試附加至 10 分鐘內的近期報帳
+    """
+    # 將 group_descriptions list 轉為 dict { group_index: description }
+    desc_map: dict[int, str] = {
+        g.group_index: g.description
+        for g in body.group_descriptions
+    }
+
+    return await liff_service.submit_session(
+        db=db,
+        session_id=session_id,
+        group_descriptions=desc_map,
+    )

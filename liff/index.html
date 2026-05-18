@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AcctAssist 批次報帳</title>
+<!-- LINE LIFF SDK -->
+<script src="https://static.line-scdn.net/liffjs/2.22.3/sdk.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f5f6fa;
+    color: #1a1a1a;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: #1a1a2e;
+    color: white;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header h1 { font-size: 17px; font-weight: 700; }
+  .user-tag {
+    font-size: 11px;
+    color: rgba(255,255,255,0.7);
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── Step bar ── */
+  .step-bar {
+    display: flex;
+    align-items: center;
+    padding: 14px 20px;
+    background: white;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .step-item {
+    display: flex; align-items: center; gap: 6px;
+    flex: 1; font-size: 12px; color: #9ca3af;
+  }
+  .step-item.active { color: #3b82f6; }
+  .step-item.done   { color: #22c55e; }
+  .step-dot {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #e5e7eb;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; flex-shrink: 0;
+  }
+  .step-item.active .step-dot { background: #3b82f6; color: white; }
+  .step-item.done   .step-dot { background: #22c55e; color: white; }
+  .step-line { flex: 1; height: 2px; background: #e5e7eb; margin: 0 4px; }
+  .step-line.done { background: #22c55e; }
+
+  /* ── Container ── */
+  .container { max-width: 640px; margin: 0 auto; padding: 20px 16px 60px; }
+
+  /* ── Upload area ── */
+  .upload-area {
+    border: 2px dashed #d1d5db; border-radius: 14px;
+    padding: 36px 20px; text-align: center;
+    background: white; cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  .upload-area:hover { border-color: #3b82f6; background: #f0f7ff; }
+  .upload-icon { font-size: 44px; margin-bottom: 10px; }
+  .upload-area h3 { font-size: 16px; margin-bottom: 6px; }
+  .upload-area p  { font-size: 13px; color: #6b7280; }
+
+  .hint-box {
+    background: #fffbeb; border: 1px solid #fcd34d;
+    border-radius: 10px; padding: 11px 14px; margin-top: 14px;
+    font-size: 13px; color: #92400e; line-height: 1.5;
+  }
+  .error-box {
+    background: #fef2f2; border: 1px solid #fca5a5;
+    border-radius: 10px; padding: 11px 14px; margin-top: 14px;
+    font-size: 13px; color: #b91c1c; line-height: 1.5;
+  }
+
+  /* ── Photo grid ── */
+  .section-title {
+    font-size: 14px; font-weight: 600; color: #374151;
+    margin-bottom: 10px; display: flex; align-items: center;
+    gap: 8px; flex-wrap: wrap;
+  }
+  .count-badge {
+    background: #3b82f6; color: white; font-size: 11px;
+    font-weight: 700; padding: 2px 9px; border-radius: 20px;
+  }
+  .drag-hint { font-size: 11px; color: #9ca3af; font-weight: 400; }
+
+  .photo-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  @media (min-width: 480px) {
+    .photo-grid { grid-template-columns: repeat(4, 1fr); }
+  }
+
+  .photo-item {
+    position: relative; aspect-ratio: 1;
+    border-radius: 10px; overflow: hidden;
+    user-select: none; touch-action: none;
+    -webkit-user-select: none; cursor: grab;
+  }
+  .photo-item:active { cursor: grabbing; }
+  .photo-item img {
+    width: 100%; height: 100%; object-fit: cover;
+    pointer-events: none; display: block;
+  }
+
+  .photo-seq {
+    position: absolute; top: 5px; left: 5px;
+    background: rgba(0,0,0,.65); color: white;
+    font-size: 11px; font-weight: 700;
+    min-width: 22px; height: 22px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 5px;
+  }
+  .photo-remove {
+    position: absolute; top: 0; right: 0;
+    background: rgba(220,38,38,.85); color: white;
+    border: none; width: 32px; height: 32px;
+    border-radius: 0 10px 0 10px;
+    font-size: 18px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; padding-bottom: 2px;
+  }
+  .photo-type-btn {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    border: none; border-radius: 0 0 10px 10px;
+    font-size: 11px; font-weight: 700; padding: 5px 0;
+    cursor: pointer; text-align: center;
+    transition: background .2s;
+    display: flex; align-items: center; justify-content: center; gap: 3px;
+  }
+  .photo-type-btn.voucher { background: rgba(29,78,216,.92); color: #fff; }
+  .photo-type-btn.item    { background: rgba(75,85,99,.85);  color: #fff; }
+  .photo-type-btn.manual::after { content: '✎'; font-size: 10px; opacity: .9; }
+
+  .photo-detecting {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,.55);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    border-radius: 10px; gap: 5px; pointer-events: none;
+  }
+  .photo-detecting .mini-spin {
+    width: 20px; height: 20px;
+    border: 2.5px solid rgba(255,255,255,.3);
+    border-top-color: #fff; border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  .photo-detecting span { color: white; font-size: 10px; font-weight: 600; }
+
+  /* Drag clone */
+  #drag-clone {
+    position: fixed; pointer-events: none; z-index: 9999;
+    border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,.4);
+    transform: scale(1.08); opacity: .92;
+  }
+  .photo-item.is-dragging { opacity: .25; }
+  .photo-item.drag-over   { outline: 3px solid #3b82f6; border-radius: 10px; }
+
+  .add-more-btn {
+    display: flex; align-items: center; justify-content: center;
+    gap: 6px; width: 100%; padding: 11px;
+    border: 2px dashed #d1d5db; border-radius: 8px;
+    background: none; color: #6b7280; font-size: 13px;
+    cursor: pointer; margin-top: 8px;
+    transition: border-color .2s, color .2s; font-family: inherit;
+  }
+  .add-more-btn:hover { border-color: #3b82f6; color: #3b82f6; }
+
+  /* ── Buttons ── */
+  .btn {
+    display: block; width: 100%; padding: 14px;
+    border: none; border-radius: 12px;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+    transition: opacity .2s, transform .1s; font-family: inherit;
+  }
+  .btn:active { transform: scale(.98); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-primary { background: #3b82f6; color: white; }
+  .btn-primary:not(:disabled):hover { background: #2563eb; }
+  .btn-success { background: #16a34a; color: white; }
+  .btn-success:not(:disabled):hover { background: #15803d; }
+  .btn-ghost { background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; }
+
+  /* ── Processing ── */
+  .processing { text-align: center; padding: 60px 20px; }
+  .spinner {
+    width: 52px; height: 52px;
+    border: 4px solid #e5e7eb; border-top-color: #3b82f6;
+    border-radius: 50%; animation: spin .75s linear infinite;
+    margin: 0 auto 20px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .processing h3 { font-size: 17px; margin-bottom: 8px; }
+  .processing p  { color: #6b7280; font-size: 14px; }
+  .progress-bar-wrap {
+    width: 100%; background: #e5e7eb; border-radius: 99px;
+    height: 6px; margin-top: 20px; overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%; background: #3b82f6; border-radius: 99px;
+    width: 0%; transition: width .4s ease;
+  }
+  .upload-status-list {
+    margin-top: 18px; text-align: left;
+    background: white; border-radius: 10px; padding: 8px 14px;
+    max-height: 180px; overflow-y: auto; font-size: 13px;
+  }
+  .upload-status-item {
+    padding: 6px 0; border-bottom: 1px solid #f3f4f6;
+    display: flex; align-items: center; gap: 8px; color: #374151;
+  }
+  .upload-status-item:last-child { border-bottom: none; }
+  .ustat-icon { font-size: 14px; flex-shrink: 0; }
+
+  /* ── Expense cards ── */
+  .confirm-banner {
+    background: #f0fdf4; border: 1px solid #86efac;
+    border-radius: 10px; padding: 12px 16px; margin-bottom: 16px;
+    font-size: 13px; color: #166534; line-height: 1.5;
+  }
+  .expense-card {
+    background: white; border-radius: 14px; padding: 16px;
+    margin-bottom: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.07);
+    border: 1px solid #f3f4f6;
+  }
+  .expense-card-header {
+    display: flex; align-items: center;
+    justify-content: space-between; margin-bottom: 12px;
+  }
+  .expense-num-badge {
+    font-size: 12px; font-weight: 700; color: #3b82f6;
+    background: #eff6ff; padding: 3px 10px; border-radius: 20px;
+  }
+  .orphan-badge {
+    font-size: 12px; font-weight: 700; color: #d97706;
+    background: #fffbeb; padding: 3px 10px; border-radius: 20px;
+  }
+  .expense-photos {
+    display: flex; gap: 8px; margin-bottom: 12px;
+    overflow-x: auto; padding-bottom: 2px;
+  }
+  .expense-photo-wrap { position: relative; flex-shrink: 0; }
+  .expense-photo {
+    width: 66px; height: 66px; border-radius: 8px;
+    object-fit: cover; display: block; border: 1px solid #e5e7eb;
+  }
+  .voucher-tag {
+    position: absolute; bottom: 3px; left: 3px;
+    background: #3b82f6; color: white;
+    font-size: 9px; font-weight: 700;
+    padding: 1px 5px; border-radius: 4px;
+  }
+  .orphan-tag {
+    position: absolute; bottom: 3px; left: 3px;
+    background: #d97706; color: white;
+    font-size: 9px; font-weight: 700;
+    padding: 1px 5px; border-radius: 4px;
+  }
+  .note-toggle-btn {
+    width: 100%; text-align: left;
+    background: none; border: 1.5px dashed #d1d5db;
+    color: #6b7280; font-size: 13px;
+    padding: 9px 12px; border-radius: 8px;
+    cursor: pointer; font-family: inherit;
+    transition: border-color .2s, color .2s;
+  }
+  .note-toggle-btn:hover { border-color: #3b82f6; color: #3b82f6; }
+  .note-input {
+    width: 100%; border: 1.5px solid #d1d5db;
+    border-radius: 8px; padding: 10px 12px;
+    font-size: 13px; resize: none; font-family: inherit;
+    color: #111827; transition: border-color .2s;
+  }
+  .note-input:focus { outline: none; border-color: #3b82f6; }
+
+  /* ── Success ── */
+  .success-screen { text-align: center; padding: 40px 10px; }
+  .success-icon { font-size: 64px; margin-bottom: 14px; }
+  .success-screen h2 { font-size: 22px; margin-bottom: 8px; }
+  .success-screen p  { color: #6b7280; font-size: 14px; }
+  .serial-list {
+    background: white; border-radius: 12px; padding: 4px 16px;
+    margin: 20px 0; text-align: left;
+    box-shadow: 0 1px 4px rgba(0,0,0,.07);
+  }
+  .serial-item {
+    padding: 11px 0; border-bottom: 1px solid #f3f4f6;
+    font-size: 13px; display: flex; align-items: center; gap: 10px;
+  }
+  .serial-item:last-child { border-bottom: none; }
+  .serial-code {
+    font-family: 'Courier New', monospace; font-weight: 700;
+    font-size: 13px; color: #1a1a2e; flex: 1;
+  }
+  .serial-status {
+    font-size: 11px; color: #f59e0b; background: #fef9ec;
+    padding: 2px 8px; border-radius: 20px; font-weight: 600;
+  }
+
+  /* ── Init overlay ── */
+  #init-overlay {
+    position: fixed; inset: 0; background: #f5f6fa;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px;
+    z-index: 9000;
+  }
+  #init-overlay .logo { font-size: 48px; }
+  #init-overlay p { color: #6b7280; font-size: 14px; }
+
+  /* Utilities */
+  .hidden { display: none !important; }
+  .mt-14 { margin-top: 14px; }
+  .mt-20 { margin-top: 20px; }
+  .mt-24 { margin-top: 24px; }
+</style>
+</head>
+<body>
+
+<!-- Init overlay (shown until LIFF ready) -->
+<div id="init-overlay">
+  <div class="logo">📋</div>
+  <div class="spinner"></div>
+  <p>初始化中...</p>
+</div>
+
+<!-- Header -->
+<div class="header">
+  <h1>📋 AcctAssist 批次報帳</h1>
+  <span class="user-tag" id="user-tag">載入中</span>
+</div>
+
+<!-- Step bar -->
+<div class="step-bar">
+  <div class="step-item active" id="si-1"><div class="step-dot">1</div><span>選取照片</span></div>
+  <div class="step-line" id="sl-1"></div>
+  <div class="step-item" id="si-2"><div class="step-dot">2</div><span>上傳辨識</span></div>
+  <div class="step-line" id="sl-2"></div>
+  <div class="step-item" id="si-3"><div class="step-dot">3</div><span>確認分組</span></div>
+  <div class="step-line" id="sl-3"></div>
+  <div class="step-item" id="si-4"><div class="step-dot">4</div><span>完成</span></div>
+</div>
+
+<div class="container">
+
+  <!-- STEP 1 -->
+  <div id="step-1">
+    <div class="upload-area" id="upload-trigger">
+      <div class="upload-icon">🖼️</div>
+      <h3>點擊選取照片</h3>
+      <p>支援一次選取多張</p>
+      <input type="file" id="file-input" multiple accept="image/*" style="display:none">
+    </div>
+    <div class="hint-box">
+      💡 請依報帳順序選取，<strong>憑證照放在對應物品照前面</strong>。系統自動辨識類型，如有誤差可手動點擊修正，也可長按縮圖拖曳調整順序。
+    </div>
+    <div id="step1-error" class="error-box hidden"></div>
+
+    <div id="photo-grid-section" class="hidden mt-20">
+      <div class="section-title">
+        已選照片
+        <span class="count-badge" id="photo-count">0</span>
+        <span class="drag-hint">✦ 長按縮圖可拖曳調整順序</span>
+      </div>
+      <div class="photo-grid" id="photo-grid"></div>
+      <button class="add-more-btn" id="add-more-btn">＋ 新增更多照片</button>
+    </div>
+
+    <div class="mt-24">
+      <button class="btn btn-primary" id="btn-upload" disabled>送出上傳</button>
+    </div>
+  </div>
+
+  <!-- STEP 2 -->
+  <div id="step-2" class="hidden">
+    <div class="processing">
+      <div class="spinner"></div>
+      <h3>上傳辨識中</h3>
+      <p id="processing-msg">正在上傳照片並進行 OCR 辨識...</p>
+      <div class="progress-bar-wrap mt-20">
+        <div class="progress-bar" id="progress-bar"></div>
+      </div>
+      <div class="upload-status-list" id="upload-status-list"></div>
+    </div>
+  </div>
+
+  <!-- STEP 3 -->
+  <div id="step-3" class="hidden">
+    <div class="confirm-banner">
+      ✅ 已辨識為 <strong id="expense-count-text">0</strong> 筆費用，請確認分組正確，並視需要填寫備注
+    </div>
+    <div id="expense-cards"></div>
+    <div class="mt-24">
+      <button class="btn btn-success" id="btn-confirm">全部確認送出</button>
+    </div>
+  </div>
+
+  <!-- STEP 4 -->
+  <div id="step-4" class="hidden">
+    <div class="success-screen">
+      <div class="success-icon">🎉</div>
+      <h2>報帳完成！</h2>
+      <p>以下費用已送出，等待審核</p>
+      <div class="serial-list" id="serial-list"></div>
+      <button class="btn btn-ghost mt-20" onclick="resetAll()">繼續報帳</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ════════════════════════════════
+//  設定（修改此區塊）
+// ════════════════════════════════
+const LIFF_ID   = '2010115806-blToY7nZ'          // 填入你的 LIFF ID（LINE Developers Console 取得）
+const API_BASE  = ''          // 留空 = same origin；若後端獨立部署改成完整 URL
+
+// ════════════════════════════════
+//  狀態
+// ════════════════════════════════
+let lineUserId  = ''
+let sessionId   = ''
+let photos      = []  // { localId, file, preview, imageId, isVoucher, manuallySet, uploaded, error }
+let previewData = null  // GET /preview 回傳
+
+// ════════════════════════════════
+//  DOM
+// ════════════════════════════════
+const fileInput         = document.getElementById('file-input')
+const uploadTrigger     = document.getElementById('upload-trigger')
+const addMoreBtn        = document.getElementById('add-more-btn')
+const photoGrid         = document.getElementById('photo-grid')
+const photoGridSection  = document.getElementById('photo-grid-section')
+const photoCountEl      = document.getElementById('photo-count')
+const btnUpload         = document.getElementById('btn-upload')
+const btnConfirm        = document.getElementById('btn-confirm')
+const initOverlay       = document.getElementById('init-overlay')
+const step1Error        = document.getElementById('step1-error')
+
+// ════════════════════════════════
+//  LIFF 初始化
+// ════════════════════════════════
+const DEV_MODE = !LIFF_ID || location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+
+async function initLiff() {
+  try {
+    if (!DEV_MODE) {
+      // 正式 LIFF 環境
+      await liff.init({ liffId: LIFF_ID })
+      if (!liff.isLoggedIn()) {
+        liff.login()
+        return
+      }
+      const profile = await liff.getProfile()
+      lineUserId = profile.userId
+      document.getElementById('user-tag').textContent = profile.displayName
+    } else {
+      // 開發模式：localhost 或無 LIFF ID → 跳過 LIFF SDK，直接用 URL 參數
+      const params = new URLSearchParams(location.search)
+      lineUserId = params.get('uid') || 'dev_user_' + Date.now()
+      document.getElementById('user-tag').textContent = '開發模式'
+    }
+
+    // 建立 Session
+    const res = await apiPost('/liff/sessions', {
+      line_user_id: lineUserId,
+      id_token: DEV_MODE ? 'dev' : (liff.getIDToken() || 'n/a')
+    })
+    sessionId = res.session_id
+    console.log('[LIFF] session created:', sessionId)
+
+    initOverlay.classList.add('hidden')
+    setupEventListeners()
+  } catch (err) {
+    console.error('[LIFF] init error:', err)
+    document.querySelector('#init-overlay p').textContent = '初始化失敗：' + (err.message || err)
+  }
+}
+
+// ════════════════════════════════
+//  API helpers
+// ════════════════════════════════
+async function apiPost(path, body) {
+  const res = await fetch(API_BASE + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Line-User-Id': lineUserId },
+    body: JSON.stringify(body)
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+async function apiGet(path) {
+  const res = await fetch(API_BASE + path, {
+    headers: { 'X-Line-User-Id': lineUserId }
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+async function apiPatch(path, body) {
+  const res = await fetch(API_BASE + path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-Line-User-Id': lineUserId },
+    body: JSON.stringify(body)
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+// ════════════════════════════════
+//  Event listeners
+// ════════════════════════════════
+function setupEventListeners() {
+  uploadTrigger.addEventListener('click', () => fileInput.click())
+  addMoreBtn.addEventListener('click',    () => fileInput.click())
+  fileInput.addEventListener('change', handleFileSelect)
+  btnUpload.addEventListener('click',  startUpload)
+  btnConfirm.addEventListener('click', confirmSubmit)
+}
+
+// ════════════════════════════════
+//  Step 1 — File Select
+// ════════════════════════════════
+function handleFileSelect(e) {
+  const files = Array.from(e.target.files)
+  if (!files.length) return
+
+  const incoming = files.map(file => ({
+    localId:      crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+    file,
+    preview:      URL.createObjectURL(file),
+    imageId:      null,    // 後端回傳後填入
+    isVoucher:    null,    // OCR 回傳後填入
+    manuallySet:  false,
+    uploaded:     false,
+    error:        false,
+  }))
+  photos = [...photos, ...incoming]
+  fileInput.value = ''
+  step1Error.classList.add('hidden')
+  renderPhotoGrid()
+}
+
+function renderPhotoGrid() {
+  const hasPhotos = photos.length > 0
+  photoGridSection.classList.toggle('hidden', !hasPhotos)
+  btnUpload.disabled    = !hasPhotos
+  btnUpload.textContent = '送出上傳'
+  if (!hasPhotos) return
+
+  photoCountEl.textContent = photos.length
+  photoGrid.innerHTML = ''
+
+  photos.forEach((photo, idx) => {
+    const el = document.createElement('div')
+    el.className   = 'photo-item'
+    el.dataset.idx = idx
+
+    let typeBtnHtml = ''
+    if (photo.isVoucher !== null) {
+      const typeCls   = photo.isVoucher ? 'voucher' : 'item'
+      const manualCls = photo.manuallySet ? 'manual' : ''
+      const typeLabel = photo.isVoucher ? '憑證' : '物品照'
+      typeBtnHtml = `<button class="photo-type-btn ${typeCls} ${manualCls}" data-idx="${idx}">${typeLabel}</button>`
+    }
+
+    el.innerHTML = `
+      <img src="${photo.preview}" alt="">
+      <div class="photo-seq">${idx + 1}</div>
+      <button class="photo-remove" data-idx="${idx}">×</button>
+      ${photo.isVoucher === null ? `<div class="photo-detecting"><div class="mini-spin"></div><span>待上傳</span></div>` : ''}
+      ${typeBtnHtml}
+    `
+
+    el.addEventListener('pointerdown',   ev => onPointerDown(ev, idx))
+    el.addEventListener('pointermove',   onPointerMove)
+    el.addEventListener('pointerup',     onPointerUp)
+    el.addEventListener('pointercancel', onPointerUp)
+
+    el.querySelector('.photo-remove').addEventListener('click', ev => {
+      ev.stopPropagation()
+      photos.splice(+ev.currentTarget.dataset.idx, 1)
+      renderPhotoGrid()
+    })
+
+    const typeBtn = el.querySelector('.photo-type-btn')
+    if (typeBtn) {
+      typeBtn.addEventListener('click', ev => {
+        ev.stopPropagation()
+        // 本地狀態先更新（樂觀 UI）；待後端回傳後同步
+        const i = +ev.currentTarget.dataset.idx
+        photos[i].isVoucher   = !photos[i].isVoucher
+        photos[i].manuallySet = true
+        renderPhotoGrid()
+      })
+    }
+
+    photoGrid.appendChild(el)
+  })
+}
+
+// ════════════════════════════════
+//  Drag & Drop (Pointer Events)
+// ════════════════════════════════
+let pDrag = null
+const DRAG_THRESHOLD = 8
+
+function onPointerDown(e, idx) {
+  if (e.target.closest('.photo-remove') || e.target.closest('.photo-type-btn')) return
+  const el   = e.currentTarget
+  const rect = el.getBoundingClientRect()
+  pDrag = { sourceIdx: idx, targetIdx: idx, el, startX: e.clientX, startY: e.clientY,
+            offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top,
+            clone: null, moved: false }
+  el.setPointerCapture(e.pointerId)
+}
+
+function onPointerMove(e) {
+  if (!pDrag) return
+  const dx = e.clientX - pDrag.startX, dy = e.clientY - pDrag.startY
+  if (!pDrag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+  e.preventDefault()
+  if (!pDrag.moved) {
+    pDrag.moved = true
+    const rect  = pDrag.el.getBoundingClientRect()
+    const clone = pDrag.el.cloneNode(true)
+    clone.id = 'drag-clone'
+    clone.style.cssText = `width:${rect.width}px;height:${rect.height}px;left:${rect.left}px;top:${rect.top}px`
+    document.body.appendChild(clone)
+    pDrag.clone = clone
+    pDrag.el.classList.add('is-dragging')
+  }
+  pDrag.clone.style.left = (e.clientX - pDrag.offsetX) + 'px'
+  pDrag.clone.style.top  = (e.clientY - pDrag.offsetY) + 'px'
+
+  let bestDist = Infinity, bestIdx = pDrag.sourceIdx
+  document.querySelectorAll('.photo-item').forEach(item => {
+    item.classList.remove('drag-over')
+    const r  = item.getBoundingClientRect()
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2
+    const d  = Math.hypot(e.clientX - cx, e.clientY - cy)
+    if (d < bestDist) { bestDist = d; bestIdx = +item.dataset.idx }
+  })
+  pDrag.targetIdx = bestIdx
+  if (bestIdx !== pDrag.sourceIdx) {
+    const t = document.querySelector(`.photo-item[data-idx="${bestIdx}"]`)
+    if (t) t.classList.add('drag-over')
+  }
+}
+
+function onPointerUp() {
+  if (!pDrag) return
+  if (pDrag.clone) pDrag.clone.remove()
+  pDrag.el.classList.remove('is-dragging')
+  document.querySelectorAll('.photo-item').forEach(i => i.classList.remove('drag-over', 'is-dragging'))
+  if (pDrag.moved && pDrag.sourceIdx !== pDrag.targetIdx) {
+    const [moved] = photos.splice(pDrag.sourceIdx, 1)
+    photos.splice(pDrag.targetIdx, 0, moved)
+    renderPhotoGrid()
+  }
+  pDrag = null
+}
+
+// ════════════════════════════════
+//  Step 2 — Upload
+// ════════════════════════════════
+async function startUpload() {
+  if (!photos.length) return
+  btnUpload.disabled = true
+  showStep(2)
+
+  const bar       = document.getElementById('progress-bar')
+  const msgEl     = document.getElementById('processing-msg')
+  const statusList = document.getElementById('upload-status-list')
+
+  // 初始化狀態清單
+  photos.forEach((p, i) => {
+    const item = document.createElement('div')
+    item.className = 'upload-status-item'
+    item.id = `us-${p.localId}`
+    item.innerHTML = `<span class="ustat-icon">⏳</span> 第 ${i + 1} 張`
+    statusList.appendChild(item)
+  })
+
+  // 平行上傳（sequence_order = 目前陣列索引，已由使用者確認）
+  let done = 0
+  const uploadTasks = photos.map((photo, idx) => {
+    const fd = new FormData()
+    fd.append('file', photo.file)
+    fd.append('sequence_order', idx)
+
+    return fetch(`${API_BASE}/liff/sessions/${sessionId}/images`, {
+      method: 'POST',
+      headers: { 'X-Line-User-Id': lineUserId },
+      body: fd
+    })
+    .then(res => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return res.json()
+    })
+    .then(data => {
+      photo.imageId    = data.image.image_id
+      photo.isVoucher  = data.is_voucher
+      photo.uploaded   = true
+
+      const label = photo.isVoucher === true ? '憑證 🟦'
+                  : photo.isVoucher === false ? '物品照'
+                  : '未辨識'
+      const el = document.getElementById(`us-${photo.localId}`)
+      if (el) el.innerHTML = `<span class="ustat-icon">✅</span> 第 ${idx + 1} 張 — ${label}`
+    })
+    .catch(err => {
+      photo.error = true
+      const el = document.getElementById(`us-${photo.localId}`)
+      if (el) el.innerHTML = `<span class="ustat-icon">❌</span> 第 ${idx + 1} 張 — 失敗`
+      console.error(`upload error photo ${idx}:`, err)
+    })
+    .finally(() => {
+      done++
+      bar.style.width = Math.round(done / photos.length * 90) + '%'
+      msgEl.textContent = `已完成 ${done} / ${photos.length} 張`
+    })
+  })
+
+  await Promise.all(uploadTasks)
+
+  // 有失敗圖片時警告但繼續（不中斷流程）
+  const failed = photos.filter(p => p.error).length
+  if (failed > 0) {
+    msgEl.textContent = `上傳完成（${failed} 張失敗，其餘已辨識）`
+  }
+
+  // 取得預覽分組
+  try {
+    bar.style.width = '95%'
+    msgEl.textContent = '取得分組預覽中...'
+    previewData = await apiGet(`/liff/sessions/${sessionId}/preview`)
+    bar.style.width = '100%'
+    setTimeout(() => {
+      buildConfirmPage()
+      showStep(3)
+    }, 300)
+  } catch (err) {
+    msgEl.textContent = '無法取得預覽：' + err.message
+  }
+}
+
+// ════════════════════════════════
+//  Step 3 — Confirm
+// ════════════════════════════════
+const groupDescriptions = {}   // { group_index: text }
+
+function buildConfirmPage() {
+  if (!previewData) return
+  const container = document.getElementById('expense-cards')
+  container.innerHTML = ''
+
+  const { groups, orphan_images } = previewData
+
+  // 孤立物品圖（附加至近期報帳）
+  if (orphan_images && orphan_images.length > 0) {
+    const card = document.createElement('div')
+    card.className = 'expense-card'
+    const photosHtml = orphan_images.map(img => {
+      const p = photos.find(ph => ph.imageId === img.image_id)
+      const src = p ? p.preview : ''
+      return `<div class="expense-photo-wrap">
+        <img src="${src}" class="expense-photo" alt="">
+        <span class="orphan-tag">物品</span>
+      </div>`
+    }).join('')
+    card.innerHTML = `
+      <div class="expense-card-header">
+        <span class="orphan-badge">孤立物品照</span>
+        <span style="font-size:12px;color:#6b7280">將附加至最近報帳</span>
+      </div>
+      <div class="expense-photos">${photosHtml}</div>
+    `
+    container.appendChild(card)
+  }
+
+  document.getElementById('expense-count-text').textContent = groups.length || 1
+
+  // 費用分組卡片
+  groups.forEach((group, idx) => {
+    const card = document.createElement('div')
+    card.className = 'expense-card'
+    card.id = `card-${idx}`
+
+    const allImages = []
+    if (group.voucher_image) allImages.push({ ...group.voucher_image, is_voucher: true })
+    ;(group.item_images || []).forEach(img => allImages.push(img))
+
+    const photosHtml = allImages.map((img, pi) => {
+      const p = photos.find(ph => ph.imageId === img.image_id)
+      const src = p ? p.preview : ''
+      const tag = (pi === 0 && img.is_voucher) ? '<span class="voucher-tag">憑證</span>' : ''
+      return `<div class="expense-photo-wrap">
+        <img src="${src}" class="expense-photo" alt="">
+        ${tag}
+      </div>`
+    }).join('')
+
+    card.innerHTML = `
+      <div class="expense-card-header">
+        <span class="expense-num-badge">第 ${idx + 1} 筆</span>
+        <span style="font-size:12px;color:#6b7280">${allImages.length} 張圖片</span>
+      </div>
+      <div class="expense-photos">${photosHtml}</div>
+      <div id="note-area-${idx}">
+        <button class="note-toggle-btn" onclick="openNote(${idx})">
+          ＋ 新增備注（選填）
+        </button>
+      </div>
+    `
+    container.appendChild(card)
+  })
+
+  // 若完全沒有 groups（全為孤立）仍顯示一個說明
+  if (groups.length === 0 && (!orphan_images || orphan_images.length === 0)) {
+    container.innerHTML = '<div class="hint-box">⚠️ 未偵測到任何憑證圖片，請返回確認圖片類型設定。</div>'
+  }
+}
+
+function openNote(idx) {
+  const area = document.getElementById(`note-area-${idx}`)
+  const existing = groupDescriptions[idx] || ''
+  area.innerHTML = `
+    <textarea class="note-input" rows="2"
+      placeholder="輸入備注（選填）"
+      oninput="groupDescriptions[${idx}] = this.value"
+    >${existing}</textarea>
+  `
+  area.querySelector('textarea').focus()
+}
+
+// ════════════════════════════════
+//  Step 4 — Submit
+// ════════════════════════════════
+async function confirmSubmit() {
+  btnConfirm.disabled    = true
+  btnConfirm.textContent = '送出中...'
+
+  const desc = Object.entries(groupDescriptions).map(([k, v]) => ({
+    group_index: +k, description: v
+  }))
+
+  try {
+    const result = await apiPost(`/liff/sessions/${sessionId}/submit`, {
+      group_descriptions: desc
+    })
+
+    const list = document.getElementById('serial-list')
+    if (!result.created_expenses || result.created_expenses.length === 0) {
+      list.innerHTML = '<div class="serial-item" style="color:#6b7280">無新增費用（物品照已附加至近期報帳）</div>'
+    } else {
+      list.innerHTML = result.created_expenses.map(e => `
+        <div class="serial-item">
+          <span style="color:#22c55e;font-size:15px">✓</span>
+          <span class="serial-code">${e.serial_number}</span>
+          <span class="serial-status">審核中</span>
+        </div>
+      `).join('')
+    }
+    showStep(4)
+  } catch (err) {
+    btnConfirm.disabled    = false
+    btnConfirm.textContent = '全部確認送出'
+    alert('送出失敗：' + err.message)
+  }
+}
+
+// ════════════════════════════════
+//  Navigation
+// ════════════════════════════════
+function showStep(n) {
+  [1, 2, 3, 4].forEach(i => {
+    document.getElementById(`step-${i}`).classList.toggle('hidden', i !== n)
+  })
+  updateStepBar(n)
+  window.scrollTo(0, 0)
+}
+
+function updateStepBar(current) {
+  [1, 2, 3, 4].forEach(i => {
+    const si = document.getElementById(`si-${i}`)
+    si.classList.remove('active', 'done')
+    if (i < current)        si.classList.add('done')
+    else if (i === current) si.classList.add('active')
+  })
+  ;[1, 2, 3].forEach(i => {
+    document.getElementById(`sl-${i}`).classList.toggle('done', i < current)
+  })
+}
+
+async function resetAll() {
+  photos            = []
+  previewData       = null
+  pDrag             = null
+  Object.keys(groupDescriptions).forEach(k => delete groupDescriptions[k])
+  document.getElementById('upload-status-list').innerHTML = ''
+  document.getElementById('progress-bar').style.width = '0%'
+  renderPhotoGrid()
+  btnConfirm.disabled    = false
+  btnConfirm.textContent = '全部確認送出'
+  btnUpload.disabled     = true
+
+  // 重新建立 session
+  try {
+    const res = await apiPost('/liff/sessions', {
+      line_user_id: lineUserId,
+      id_token: DEV_MODE ? 'dev' : (liff.getIDToken() || 'n/a')
+    })
+    sessionId = res.session_id
+  } catch (err) {
+    console.error('reset session failed:', err)
+  }
+
+  showStep(1)
+}
+
+// ════════════════════════════════
+//  Bootstrap
+// ════════════════════════════════
+initLiff()
+</script>
+</body>
+</html>
