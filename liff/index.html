@@ -457,7 +457,7 @@ const step1Error        = document.getElementById('step1-error')
 // ════════════════════════════════
 //  LIFF 初始化
 // ════════════════════════════════
-const DEV_MODE = !LIFF_ID || location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+const DEV_MODE = (typeof liff === 'undefined') || !LIFF_ID || location.hostname === 'localhost' || location.hostname === '127.0.0.1'
 
 async function initLiff() {
   try {
