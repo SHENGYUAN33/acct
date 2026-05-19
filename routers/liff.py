@@ -13,7 +13,7 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from core.database import get_db
@@ -43,19 +43,21 @@ router = APIRouter(
 
 def get_line_user_id(
     x_line_user_id: str | None = Header(default=None, alias="X-Line-User-Id"),
+    uid: str | None = Query(default=None, description="LINE user id（apiGet fallback，與 X-Line-User-Id 擇一）"),
 ) -> str:
     """
-    從請求 Header 取得 LINE 使用者 ID。
+    從請求 Header 或 query param 取得 LINE 使用者 ID。
 
-    LIFF 前端需在每個請求帶入：
-        X-Line-User-Id: {liff.getProfile().userId}
+    優先讀 X-Line-User-Id header；若 header 被 LINE WebKit 限制，
+    前端 apiGet 會改用 ?uid= query param 作為備援。
     """
-    if not x_line_user_id:
+    user_id = x_line_user_id or uid
+    if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="缺少 X-Line-User-Id header，請透過 LIFF 頁面呼叫此 API",
         )
-    return x_line_user_id
+    return user_id
 
 
 # ---------------------------------------------------------------------------

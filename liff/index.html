@@ -257,14 +257,22 @@
     display: flex; gap: 8px; margin-bottom: 12px;
     overflow-x: auto; padding-bottom: 2px;
   }
-  .expense-photo-wrap { position: relative; flex-shrink: 0; }
+  .expense-photo-wrap { position: relative; flex-shrink: 0; cursor: pointer; }
+  .expense-photo-wrap:hover .expense-photo { opacity: 0.78; }
   .expense-photo {
     width: 66px; height: 66px; border-radius: 8px;
     object-fit: cover; display: block; border: 1px solid #e5e7eb;
+    transition: opacity .15s;
   }
   .voucher-tag {
     position: absolute; bottom: 3px; left: 3px;
     background: #3b82f6; color: white;
+    font-size: 9px; font-weight: 700;
+    padding: 1px 5px; border-radius: 4px;
+  }
+  .item-tag {
+    position: absolute; bottom: 3px; left: 3px;
+    background: #4b5563; color: white;
     font-size: 9px; font-weight: 700;
     padding: 1px 5px; border-radius: 4px;
   }
@@ -426,11 +434,16 @@
 </div>
 
 <script>
+// LINE 瀏覽器 bfcache 防護：若頁面從記憶體快取恢復，強制重新向 server 取新版 HTML
+window.addEventListener('pageshow', function (ev) {
+  if (ev.persisted) { window.location.reload() }
+})
+
 // ════════════════════════════════
 //  設定（修改此區塊）
 // ════════════════════════════════
 const LIFF_ID   = '2010115806-blToY7nZ'          // 填入你的 LIFF ID（LINE Developers Console 取得）
-const API_BASE  = ''          // 留空 = same origin；若後端獨立部署改成完整 URL
+const API_BASE  = '{{LIFF_API_BASE}}'            // 由 server 啟動時注入，勿手動修改此行
 
 // ════════════════════════════════
 //  狀態
@@ -512,8 +525,15 @@ async function apiPost(path, body) {
 }
 
 async function apiGet(path) {
-  const res = await fetch(API_BASE + path, {
-    headers: { 'X-Line-User-Id': lineUserId }
+  // uid 以 query param 備援（防 LINE WebKit 限制 X-Line-* header）
+  // ngrok-skip-browser-warning：跳過 ngrok 免費版的 GET 請求 browser interstitial 重定向
+  const sep = path.includes('?') ? '&' : '?'
+  const url = API_BASE + path + sep + 'uid=' + encodeURIComponent(lineUserId || '')
+  const res = await fetch(url, {
+    headers: {
+      'X-Line-User-Id': lineUserId,
+      'ngrok-skip-browser-warning': 'true',
+    }
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }))
@@ -774,16 +794,17 @@ async function fetchPreview(bar, msgEl) {
   try {
     bar.style.width = '95%'
     msgEl.textContent = '取得分組預覽中...'
-    previewData = await apiGet(`${API_BASE}/liff/sessions/${sessionId}/preview`)
+    previewData = await apiGet(`/liff/sessions/${sessionId}/preview`)
     bar.style.width = '100%'
     setTimeout(() => {
       buildConfirmPage()
       showStep(3)
     }, 300)
   } catch (err) {
-    console.error('[preview] 失敗，sessionId=', sessionId, err)
+    const _debugUrl = API_BASE + `/liff/sessions/${sessionId}/preview`
+    console.error('[preview] 失敗 url=', _debugUrl, 'err=', err)
     msgEl.innerHTML = `
-      <span style="color:#ef4444;font-size:13px">預覽失敗：${err.message}<br>session: ${sessionId || '(空)'}  user: ${lineUserId || '(空)'}</span><br>
+      <span style="color:#ef4444;font-size:13px">預覽失敗：${err.message}<br>URL: ${_debugUrl}<br>session: ${sessionId || '(空)'}  user: ${lineUserId || '(空)'}</span><br>
       <button onclick="fetchPreview()" style="margin-top:10px;padding:8px 20px;background:#3b82f6;color:white;border:none;border-radius:8px;font-size:14px;cursor:pointer">重新取得預覽</button>
     `
   }
@@ -793,6 +814,7 @@ async function fetchPreview(bar, msgEl) {
 //  Step 3 — Confirm
 // ════════════════════════════════
 const groupDescriptions = {}   // { group_index: text }
+let isRefreshing = false
 
 function buildConfirmPage() {
   if (!previewData) return
@@ -808,9 +830,9 @@ function buildConfirmPage() {
     const photosHtml = orphan_images.map(img => {
       const p = photos.find(ph => ph.imageId === img.image_id)
       const src = p ? p.preview : ''
-      return `<div class="expense-photo-wrap">
+      return `<div class="expense-photo-wrap" onclick="toggleImageType('${img.image_id}')">
         <img src="${src}" class="expense-photo" alt="">
-        <span class="orphan-tag">物品</span>
+        <span class="orphan-tag" id="img-tag-${img.image_id}">物品 ✎</span>
       </div>`
     }).join('')
     card.innerHTML = `
@@ -835,13 +857,15 @@ function buildConfirmPage() {
     if (group.voucher_image) allImages.push({ ...group.voucher_image, is_voucher: true })
     ;(group.item_images || []).forEach(img => allImages.push(img))
 
-    const photosHtml = allImages.map((img, pi) => {
+    const photosHtml = allImages.map(img => {
       const p = photos.find(ph => ph.imageId === img.image_id)
       const src = p ? p.preview : ''
-      const tag = (pi === 0 && img.is_voucher) ? '<span class="voucher-tag">憑證</span>' : ''
-      return `<div class="expense-photo-wrap">
+      const isV      = img.is_voucher === true
+      const tagCls   = isV ? 'voucher-tag' : 'item-tag'
+      const tagLabel = isV ? '憑證 ✎' : '物品 ✎'
+      return `<div class="expense-photo-wrap" onclick="toggleImageType('${img.image_id}')">
         <img src="${src}" class="expense-photo" alt="">
-        ${tag}
+        <span class="${tagCls}" id="img-tag-${img.image_id}">${tagLabel}</span>
       </div>`
     }).join('')
 
@@ -876,6 +900,42 @@ function openNote(idx) {
     >${existing}</textarea>
   `
   area.querySelector('textarea').focus()
+}
+
+async function toggleImageType(imageId) {
+  if (isRefreshing) return
+  isRefreshing = true
+
+  const photo = photos.find(p => p.imageId === imageId)
+  if (!photo) { isRefreshing = false; return }
+
+  const newIsVoucher = !photo.isVoucher
+
+  // 樂觀 UI：先更新標籤，不等後端
+  const tagEl = document.getElementById(`img-tag-${imageId}`)
+  if (tagEl) {
+    tagEl.className   = newIsVoucher ? 'voucher-tag' : 'item-tag'
+    tagEl.textContent = (newIsVoucher ? '憑證' : '物品') + ' ✎'
+  }
+
+  try {
+    const updated = await apiPatch(`/liff/sessions/${sessionId}/images/${imageId}`, {
+      is_voucher: newIsVoucher
+    })
+    photo.isVoucher   = updated.is_voucher
+    photo.manuallySet = updated.manually_set
+
+    // 重新取得分組預覽並重建卡片
+    previewData = await apiGet(`/liff/sessions/${sessionId}/preview`)
+    buildConfirmPage()
+  } catch (err) {
+    // 後端失敗 → 回滾本地狀態
+    photo.isVoucher = !newIsVoucher
+    alert('切換失敗：' + err.message)
+    buildConfirmPage()
+  } finally {
+    isRefreshing = false
+  }
 }
 
 // ════════════════════════════════

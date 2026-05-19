@@ -3,9 +3,9 @@
 import logging
 import os as _os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from core.config import settings
@@ -56,9 +56,26 @@ _liff_index = _os.path.join(_BASE_DIR, "liff", "index.html")
 
 @app.get("/liff-app", include_in_schema=False)
 @app.get("/liff-app/", include_in_schema=False)
-async def serve_liff_root() -> FileResponse:
-    """LIFF 前端入口（單頁應用）。"""
-    return FileResponse(_liff_index)
+async def serve_liff_root(request: Request) -> Response:
+    """LIFF 前端入口。由 server 注入 API_BASE 並加 no-store 防止 LINE WebKit 快取舊版。"""
+    # 使用 x-forwarded 標頭支援 ngrok / reverse proxy；fallback 取 Host header
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "localhost:8000")
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
+    api_base = f"{proto}://{host}"
+
+    with open(_liff_index, "r", encoding="utf-8") as f:
+        content = f.read()
+    content = content.replace("'{{LIFF_API_BASE}}'", f"'{api_base}'")
+
+    return Response(
+        content=content,
+        media_type="text/html; charset=utf-8",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.on_event("startup")
