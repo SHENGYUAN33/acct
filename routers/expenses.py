@@ -19,8 +19,8 @@ from core.database import get_db
 from routers.auth import get_current_user
 from models.expense import Expense, ExpenseStatus
 from models.user import User
-from schemas.expense import ExpenseCreate, ExpenseListResponse, ExpenseRead, ExpenseUpdate
-from schemas.expense_image import ExpenseImageRead
+from schemas.expense import ExpenseCreate, ExpenseListResponse, ExpenseRead, ExpenseUpdate, ExpenseWithImages
+from schemas.expense_image import ExpenseImageRead, ExpenseImageUpdate, MoveImageRequest
 from schemas.ocr import VoucherOCRResult
 from services import expense_service, line_service
 from services.ocr_service import classify_and_extract_with_retry
@@ -146,6 +146,21 @@ def get_related_expenses(expense_id: uuid.UUID, db: Session = Depends(get_db)) -
     return {
         "status": "success",
         "data": [ExpenseRead.model_validate(c).model_dump() for c in children],
+        "message": "ok",
+    }
+
+
+# ── GET /expenses/{id}/batch（批次組查詢）────────────────────────
+@router.get("/expenses/{expense_id}/batch", response_model=dict)
+def get_expense_batch(
+    expense_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> dict:
+    """回傳與指定 expense 同一批次（相同 group_id）的所有 Expense，含 images 子清單。"""
+    expenses = expense_service.get_batch_expenses(db, expense_id)
+    return {
+        "status": "success",
+        "data": {"expenses": [ExpenseWithImages.model_validate(e).model_dump() for e in expenses]},
         "message": "ok",
     }
 
@@ -338,6 +353,48 @@ async def replace_expense_image(
         "status": "success",
         "data": ExpenseRead.model_validate(updated).model_dump(),
         "message": f"{image_type} image replaced at index {index}",
+    }
+
+
+# ── PATCH /expenses/{id}/images/{image_id}（修正圖片分類）────────
+@router.patch("/expenses/{expense_id}/images/{image_id}", response_model=dict)
+def update_expense_image_classification(
+    expense_id: uuid.UUID,
+    image_id: uuid.UUID,
+    body: ExpenseImageUpdate,
+    db: Session = Depends(get_db),
+) -> dict:
+    """修正 ExpenseImage 的分類欄位（is_voucher / voucher_category / expense_category 等）。"""
+    image = expense_service.update_expense_image(
+        db, expense_id, image_id, body.model_dump(exclude_none=True)
+    )
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found or does not belong to this expense")
+    return {
+        "status": "success",
+        "data": ExpenseImageRead.model_validate(image).model_dump(),
+        "message": "分類已更新",
+    }
+
+
+# ── POST /expenses/{id}/images/{image_id}/move（跨交易搬移圖片）──
+@router.post("/expenses/{expense_id}/images/{image_id}/move", response_model=dict)
+def move_expense_image(
+    expense_id: uuid.UUID,
+    image_id: uuid.UUID,
+    body: MoveImageRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """將 ExpenseImage 從一筆 Expense 搬移至同批次的另一筆。"""
+    if body.target_expense_id == expense_id:
+        raise HTTPException(status_code=400, detail="來源與目標 Expense 相同")
+    image = expense_service.move_expense_image(db, expense_id, image_id, body.target_expense_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found or expense not found")
+    return {
+        "status": "success",
+        "data": ExpenseImageRead.model_validate(image).model_dump(),
+        "message": "圖片已搬移",
     }
 
 

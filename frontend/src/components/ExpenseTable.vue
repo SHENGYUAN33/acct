@@ -5,6 +5,7 @@ import { getExpense } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
 import { Pencil, Trash2, Plus, ChevronsUpDown, ChevronRight, Link2, GripVertical } from 'lucide-vue-next'
 import ConfirmModal from './ConfirmModal.vue'
+import BatchGroupModal from './BatchGroupModal.vue'
 
 const store = useExpenseStore()
 
@@ -14,6 +15,11 @@ const expandedRows = ref(new Set())
 const parentCache = ref({})
 // 載入中的 expense id 集合
 const fetchingParent = ref(new Set())
+
+// 批次組 Modal
+const batchModalExpenseId = ref(null)
+function openBatchModal(expense) { batchModalExpenseId.value = expense.id }
+function closeBatchModal() { batchModalExpenseId.value = null }
 
 async function toggleExpand(expense) {
   const id = expense.id
@@ -255,6 +261,15 @@ function onDragEnd() {
                     class="text-[10px] px-1 py-0.5 rounded bg-yellow-100 text-yellow-700"
                     title="自動送出"
                   >⏱</span>
+                  <!-- 批次組 Badge -->
+                  <button
+                    v-if="expense.group_id"
+                    @click.stop="openBatchModal(expense)"
+                    class="text-[10px] px-1 py-0.5 rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition-colors"
+                    title="查看批次組照片"
+                  >
+                    批次
+                  </button>
                 </div>
               </td>
 
@@ -512,5 +527,12 @@ function onDragEnd() {
     :description="`確定要刪除此筆費用（${pendingDeleteExpense ? (pendingDeleteExpense.serial_number || '#' + pendingDeleteExpense.serial) : ''}）嗎？此操作無法復原。`"
     @confirm="confirmDelete"
     @cancel="isConfirmOpen = false"
+  />
+
+  <!-- 批次組 Modal -->
+  <BatchGroupModal
+    v-if="batchModalExpenseId"
+    :expense-id="batchModalExpenseId"
+    @close="closeBatchModal"
   />
 </template>

@@ -24,3 +24,14 @@ class ExpenseImageRead(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ExpenseImageUpdate(BaseModel):
+    is_voucher: bool | None = None
+    voucher_category: str | None = None
+    voucher_subtype: str | None = None
+    expense_category: str | None = None
+
+
+class MoveImageRequest(BaseModel):
+    target_expense_id: uuid.UUID

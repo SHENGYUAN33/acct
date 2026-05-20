@@ -135,3 +135,14 @@ export const replaceImage = (id, file, imageType, index) => {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
 }
+
+export const updateExpenseImage = (expenseId, imageId, payload) =>
+  apiClient.patch(`/api/v1/expenses/${expenseId}/images/${imageId}`, payload)
+
+export const fetchBatchExpenses = (expenseId) =>
+  apiClient.get(`/api/v1/expenses/${expenseId}/batch`)
+
+export const moveExpenseImage = (expenseId, imageId, targetExpenseId) =>
+  apiClient.post(`/api/v1/expenses/${expenseId}/images/${imageId}/move`, {
+    target_expense_id: targetExpenseId,
+  })

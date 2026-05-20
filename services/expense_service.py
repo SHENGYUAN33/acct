@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 from sqlalchemy import select, func, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from models.expense import Expense, ExpenseStatus
 from models.expense_image import ExpenseImage
@@ -878,3 +878,128 @@ def reupload_expense(
     db.commit()
     db.refresh(expense)
     return expense
+
+
+# ---------------------------------------------------------------------------
+# 圖片分類修正 / 批次組查詢 / 跨交易圖片搬移
+# ---------------------------------------------------------------------------
+
+def update_expense_image(
+    db: Session,
+    expense_id: uuid.UUID,
+    image_id: uuid.UUID,
+    updates: dict,
+) -> ExpenseImage | None:
+    """更新 ExpenseImage 的分類欄位，並同步 Expense 的 image_url / item_image_url 陣列。"""
+    image = db.get(ExpenseImage, image_id)
+    if not image or image.expense_id != expense_id:
+        return None
+
+    expense = db.get(Expense, expense_id)
+    if not expense:
+        return None
+
+    old_is_voucher = image.is_voucher
+    new_is_voucher = updates.get("is_voucher", old_is_voucher)
+
+    for field, value in updates.items():
+        setattr(image, field, value)
+
+    # 若 is_voucher 改變，同步搬移 URL 於 Expense 的兩個陣列之間
+    if new_is_voucher != old_is_voucher:
+        if old_is_voucher:
+            # True → False：從 image_url 移除，加入 item_image_url
+            src_list = list(expense.image_url or [])
+            dst_list = list(expense.item_image_url or [])
+            if image.image_url in src_list:
+                src_list.remove(image.image_url)
+            dst_list.append(image.image_url)
+            expense.image_url = src_list
+            expense.item_image_url = dst_list
+        else:
+            # False → True：從 item_image_url 移除，加入 image_url
+            src_list = list(expense.item_image_url or [])
+            dst_list = list(expense.image_url or [])
+            if image.image_url in src_list:
+                src_list.remove(image.image_url)
+            dst_list.append(image.image_url)
+            expense.item_image_url = src_list
+            expense.image_url = dst_list
+
+    db.commit()
+    db.refresh(image)
+    return image
+
+
+def get_batch_expenses(
+    db: Session,
+    expense_id: uuid.UUID,
+) -> list[Expense]:
+    """回傳與指定 expense 同一批次（相同 group_id）的所有 Expense，含 images 關聯。"""
+    source = db.get(Expense, expense_id)
+    if not source:
+        return []
+
+    if source.group_id is None:
+        db.scalars(
+            select(ExpenseImage).where(ExpenseImage.expense_id == expense_id)
+        ).all()
+        return [source]
+
+    return list(
+        db.scalars(
+            select(Expense)
+            .where(Expense.group_id == source.group_id)
+            .options(selectinload(Expense.images))
+            .order_by(Expense.created_at.asc())
+        ).all()
+    )
+
+
+def move_expense_image(
+    db: Session,
+    source_expense_id: uuid.UUID,
+    image_id: uuid.UUID,
+    target_expense_id: uuid.UUID,
+) -> ExpenseImage | None:
+    """將 ExpenseImage 從一筆 Expense 搬移至另一筆，同步更新兩邊的 image_url / item_image_url 陣列。"""
+    image = db.get(ExpenseImage, image_id)
+    if not image or image.expense_id != source_expense_id:
+        return None
+
+    source = db.get(Expense, source_expense_id)
+    target = db.get(Expense, target_expense_id)
+    if not source or not target:
+        return None
+
+    src_field = "image_url" if image.is_voucher else "item_image_url"
+
+    # 從 source 移除
+    src_list = list(getattr(source, src_field) or [])
+    if image.image_url in src_list:
+        src_list.remove(image.image_url)
+    setattr(source, src_field, src_list)
+
+    # 更新 ownership
+    image.expense_id = target_expense_id
+
+    # 加入 target
+    tgt_list = list(getattr(target, src_field) or [])
+    tgt_list.append(image.image_url)
+    setattr(target, src_field, tgt_list)
+
+    # 重排 source 剩餘圖片的 sequence_order
+    remaining = list(
+        db.scalars(
+            select(ExpenseImage)
+            .where(ExpenseImage.expense_id == source_expense_id)
+            .where(ExpenseImage.id != image_id)
+            .order_by(ExpenseImage.sequence_order.asc())
+        ).all()
+    )
+    for i, img in enumerate(remaining, start=1):
+        img.sequence_order = i
+
+    db.commit()
+    db.refresh(image)
+    return image

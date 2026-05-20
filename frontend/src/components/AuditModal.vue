@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { useExpenseStore } from '../stores/expenseStore'
-import { fetchExpenseImages } from '../api/expenseApi'
+import { fetchExpenseImages, updateExpenseImage } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
 import {
   ImagePlus,
@@ -27,6 +27,71 @@ const CATEGORY_LABEL = {
   LABOR_SERVICE: '勞報',
   TRANSPORTATION: '交通',
   CREDIT_NOTE: '退貨折讓',
+  INSURANCE: '保險',
+  UTILITY: '水電',
+  RENTAL: '租金',
+  ACCOMMODATION: '住宿',
+  POSTAGE: '郵資',
+}
+
+const VOUCHER_CATEGORY_OPTIONS = [
+  { value: 'INVOICE', label: '發票' },
+  { value: 'RECEIPT', label: '收據' },
+  { value: 'LABOR_SERVICE', label: '勞報' },
+  { value: 'TRANSPORTATION', label: '交通' },
+  { value: 'CREDIT_NOTE', label: '退貨折讓' },
+  { value: 'INSURANCE', label: '保險' },
+  { value: 'UTILITY', label: '水電' },
+  { value: 'RENTAL', label: '租金' },
+  { value: 'ACCOMMODATION', label: '住宿' },
+  { value: 'POSTAGE', label: '郵資' },
+]
+
+const EXPENSE_CATEGORY_OPTIONS = [
+  { value: 'MEAL', label: '餐費' },
+  { value: 'TRANSPORTATION', label: '交通費' },
+  { value: 'STATIONERY', label: '文具' },
+  { value: 'INSURANCE', label: '保險' },
+  { value: 'UTILITY', label: '水電' },
+  { value: 'ACCOMMODATION', label: '住宿' },
+  { value: 'OTHER', label: '其他' },
+]
+
+// ── 圖片分類編輯狀態 ─────────────────────────────────────────────
+const editingImageId = ref(null)
+const editImageForm = ref({})
+const isSavingImageClass = ref(false)
+
+function startEditImage(img) {
+  editingImageId.value = img.id
+  editImageForm.value = {
+    is_voucher: img.is_voucher,
+    voucher_category: img.voucher_category ?? '',
+    expense_category: img.expense_category ?? '',
+  }
+}
+
+function cancelEditImage() {
+  editingImageId.value = null
+}
+
+async function saveImageClassification(img) {
+  isSavingImageClass.value = true
+  try {
+    const payload = { ...editImageForm.value }
+    for (const k of ['voucher_category', 'expense_category']) {
+      if (payload[k] === '') payload[k] = null
+    }
+    await updateExpenseImage(form.value.id, img.id, payload)
+    const idx = subImages.value.findIndex(i => i.id === img.id)
+    if (idx !== -1) subImages.value[idx] = { ...subImages.value[idx], ...payload }
+    editingImageId.value = null
+    toast.success('分類已更新')
+  } catch {
+    toast.error('更新失敗，請稍後再試')
+  } finally {
+    isSavingImageClass.value = false
+  }
 }
 
 // ── 本地表單（從 store.selectedExpense 複製，避免直接污染 store）──
@@ -842,7 +907,7 @@ function formatDateTime(val) {
                   <div v-else-if="subImages.length > 0" class="space-y-3">
                     <div
                       v-for="(img, i) in subImages"
-                      :key="i"
+                      :key="img.id || i"
                       class="flex items-start gap-3 bg-white border border-gray-200 rounded-lg p-3"
                     >
                       <!-- 縮圖 -->
@@ -852,23 +917,100 @@ function formatDateTime(val) {
                         class="w-16 h-16 object-cover rounded border border-gray-200 cursor-zoom-in shrink-0"
                         @click="openLightbox(BACKEND_BASE_URL + '/' + img.image_url)"
                       />
-                      <!-- 資訊區 -->
-                      <div class="flex-1 min-w-0 space-y-1">
-                        <!-- voucher_category 標籤 -->
-                        <span
-                          v-if="img.voucher_category"
-                          class="inline-block bg-blue-100 text-blue-700 text-xs font-medium px-2 py-0.5 rounded"
-                        >
-                          {{ getCategoryLabel(img.voucher_category) }}
-                        </span>
-                        <!-- OCR 金額摘要 -->
-                        <div v-if="parseOcrAmount(img.ocr_result) !== null" class="text-sm text-gray-700">
-                          金額：<span class="font-medium">NT$ {{ formatAmount(parseOcrAmount(img.ocr_result)) }}</span>
+
+                      <!-- View mode -->
+                      <template v-if="editingImageId !== img.id">
+                        <div class="flex-1 min-w-0 space-y-1">
+                          <!-- is_voucher badge -->
+                          <span
+                            :class="img.is_voucher
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-gray-100 text-gray-500'"
+                            class="inline-block text-xs font-medium px-2 py-0.5 rounded"
+                          >
+                            {{ img.is_voucher ? '憑證' : '非憑證' }}
+                          </span>
+                          <!-- voucher_category badge -->
+                          <span
+                            v-if="img.voucher_category"
+                            class="ml-1 inline-block bg-blue-100 text-blue-700 text-xs font-medium px-2 py-0.5 rounded"
+                          >
+                            {{ getCategoryLabel(img.voucher_category) }}
+                          </span>
+                          <!-- expense_category badge -->
+                          <span
+                            v-if="img.expense_category"
+                            class="ml-1 inline-block bg-purple-100 text-purple-700 text-xs font-medium px-2 py-0.5 rounded"
+                          >
+                            {{ img.expense_category }}
+                          </span>
+                          <!-- OCR 金額摘要 -->
+                          <div v-if="parseOcrAmount(img.ocr_result) !== null" class="text-sm text-gray-700">
+                            金額：<span class="font-medium">NT$ {{ formatAmount(parseOcrAmount(img.ocr_result)) }}</span>
+                          </div>
+                          <!-- 編輯按鈕 -->
+                          <button
+                            @click="startEditImage(img)"
+                            class="mt-1 text-xs text-indigo-600 hover:text-indigo-800 underline"
+                          >
+                            編輯分類
+                          </button>
                         </div>
-                        <div v-if="!img.voucher_category && parseOcrAmount(img.ocr_result) === null" class="text-xs text-gray-400">
-                          無分類資訊
+                      </template>
+
+                      <!-- Edit mode -->
+                      <template v-else>
+                        <div class="flex-1 min-w-0 space-y-2">
+                          <!-- is_voucher -->
+                          <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                            <input type="checkbox" v-model="editImageForm.is_voucher" class="rounded" />
+                            此張為憑證
+                          </label>
+                          <!-- voucher_category -->
+                          <div>
+                            <label class="block text-xs text-gray-500 mb-0.5">憑證類別</label>
+                            <select
+                              v-model="editImageForm.voucher_category"
+                              :disabled="!editImageForm.is_voucher"
+                              class="w-full text-xs border border-gray-300 rounded px-2 py-1 disabled:opacity-40"
+                            >
+                              <option value="">— 未設定 —</option>
+                              <option v-for="opt in VOUCHER_CATEGORY_OPTIONS" :key="opt.value" :value="opt.value">
+                                {{ opt.label }}
+                              </option>
+                            </select>
+                          </div>
+                          <!-- expense_category -->
+                          <div>
+                            <label class="block text-xs text-gray-500 mb-0.5">費用科目</label>
+                            <select
+                              v-model="editImageForm.expense_category"
+                              class="w-full text-xs border border-gray-300 rounded px-2 py-1"
+                            >
+                              <option value="">— 未設定 —</option>
+                              <option v-for="opt in EXPENSE_CATEGORY_OPTIONS" :key="opt.value" :value="opt.value">
+                                {{ opt.label }}
+                              </option>
+                            </select>
+                          </div>
+                          <!-- 儲存 / 取消 -->
+                          <div class="flex gap-2 pt-1">
+                            <button
+                              @click="saveImageClassification(img)"
+                              :disabled="isSavingImageClass"
+                              class="text-xs bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 disabled:opacity-50"
+                            >
+                              {{ isSavingImageClass ? '儲存中...' : '儲存' }}
+                            </button>
+                            <button
+                              @click="cancelEditImage"
+                              class="text-xs border border-gray-300 text-gray-600 px-3 py-1 rounded hover:bg-gray-50"
+                            >
+                              取消
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      </template>
                     </div>
                   </div>
 

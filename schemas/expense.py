@@ -5,6 +5,7 @@ from decimal import Decimal
 from pydantic import BaseModel
 
 from models.expense import ExpenseStatus
+from schemas.expense_image import ExpenseImageRead
 
 
 class ExpenseRead(BaseModel):
@@ -108,3 +109,8 @@ class ExpenseListResponse(BaseModel):
     page: int
     page_size: int
     items: list[ExpenseRead]
+
+
+class ExpenseWithImages(ExpenseRead):
+    """ExpenseRead + 已 eager load 的 ExpenseImage 清單，用於批次組 API 回應。"""
+    images: list[ExpenseImageRead] = []
