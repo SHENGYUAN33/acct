@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { X, Loader2, ArrowRightLeft } from 'lucide-vue-next'
+import { X, Loader2, GripVertical, ArrowRightLeft } from 'lucide-vue-next'
 import { fetchBatchExpenses, moveExpenseImage } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
 
@@ -13,9 +13,8 @@ const BACKEND_BASE = 'http://localhost:8000'
 
 const isLoading = ref(true)
 const batchExpenses = ref([])
-const movingImageId = ref(null)
-const movingImageSourceId = ref(null)
-const moveTargetId = ref('')
+const dragging = ref(null)         // { imgId, sourceExpenseId }
+const dragOverExpenseId = ref(null)
 const isMoving = ref(false)
 
 const STATUS_LABEL = {
@@ -29,15 +28,15 @@ const STATUS_LABEL = {
   COMPLETED: '已完成',
 }
 
-const STATUS_CLASS = {
-  PENDING: 'bg-yellow-100 text-yellow-700',
-  APPROVED: 'bg-green-100 text-green-700',
-  REJECTED: 'bg-red-100 text-red-700',
-  NEEDS_MANUAL_REVIEW: 'bg-orange-100 text-orange-700',
-  SUPPLEMENTED: 'bg-blue-100 text-blue-700',
-  REPLACED_VOID: 'bg-gray-100 text-gray-500',
-  WAITING_RETURN: 'bg-purple-100 text-purple-700',
-  COMPLETED: 'bg-teal-100 text-teal-700',
+const STATUS_DOT = {
+  PENDING: 'bg-yellow-400',
+  APPROVED: 'bg-green-500',
+  REJECTED: 'bg-red-500',
+  NEEDS_MANUAL_REVIEW: 'bg-orange-400',
+  SUPPLEMENTED: 'bg-blue-400',
+  REPLACED_VOID: 'bg-gray-400',
+  WAITING_RETURN: 'bg-purple-400',
+  COMPLETED: 'bg-teal-500',
 }
 
 const CATEGORY_LABEL = {
@@ -56,6 +55,10 @@ const CATEGORY_LABEL = {
 function imgUrl(url) {
   if (!url) return ''
   return url.startsWith('http') ? url : `${BACKEND_BASE}/${url}`
+}
+
+function shortGroupId(id) {
+  return id ? id.slice(0, 8) + '...' : '—'
 }
 
 function categoryLabel(code) {
@@ -78,69 +81,108 @@ async function loadBatch() {
 
 onMounted(loadBatch)
 
-function openMove(img, sourceExpenseId) {
-  movingImageId.value = img.id
-  movingImageSourceId.value = sourceExpenseId
-  moveTargetId.value = ''
+// ── Drag-and-drop handlers ──────────────────────────────────────
+
+function onDragStart(event, img, sourceExpenseId) {
+  dragging.value = { imgId: img.id, sourceExpenseId }
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/plain', img.id)
+  // 讓拖曳中的卡片變半透明（CSS class 由 :class 綁定）
 }
 
-function cancelMove() {
-  movingImageId.value = null
-  movingImageSourceId.value = null
+function onDragOver(event, targetExpenseId) {
+  if (!dragging.value || dragging.value.sourceExpenseId === targetExpenseId) return
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'move'
+  dragOverExpenseId.value = targetExpenseId
 }
 
-async function confirmMove() {
-  if (!moveTargetId.value) return
+function onDragLeave(event) {
+  // 只在真正離開欄位（而非進入子元素）時清除高亮
+  if (!event.currentTarget.contains(event.relatedTarget)) {
+    dragOverExpenseId.value = null
+  }
+}
+
+function onDragEnd() {
+  dragging.value = null
+  dragOverExpenseId.value = null
+}
+
+async function onDrop(event, targetExpenseId) {
+  event.preventDefault()
+  if (!dragging.value || dragging.value.sourceExpenseId === targetExpenseId) {
+    dragging.value = null
+    dragOverExpenseId.value = null
+    return
+  }
   isMoving.value = true
+  const { imgId, sourceExpenseId } = dragging.value
+  dragging.value = null
+  dragOverExpenseId.value = null
   try {
-    await moveExpenseImage(movingImageSourceId.value, movingImageId.value, moveTargetId.value)
-    toast.success('圖片已搬移')
-    movingImageId.value = null
-    movingImageSourceId.value = null
+    await moveExpenseImage(sourceExpenseId, imgId, targetExpenseId)
+    toast.success('圖片已移動')
     await loadBatch()
   } catch (err) {
     console.error('[BatchGroupModal] 搬移失敗：', err)
-    toast.error('搬移失敗，請稍後再試')
+    toast.error('移動失敗，請稍後再試')
   } finally {
     isMoving.value = false
   }
 }
 
-function otherExpenses(currentExpenseId) {
-  return batchExpenses.value.filter(e => e.id !== currentExpenseId)
+function isDraggingFromThisColumn(expenseId) {
+  return dragging.value?.sourceExpenseId === expenseId
 }
 </script>
 
 <template>
   <!-- Overlay -->
   <div
-    class="fixed inset-0 z-[55] bg-black/50 flex items-center justify-center p-4"
+    class="fixed inset-0 z-[55] bg-black/60 flex items-center justify-center p-4"
     @click.self="emit('close')"
   >
     <!-- Panel -->
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden">
 
       <!-- Header -->
-      <div class="flex items-center justify-between px-5 py-4 border-b border-gray-200 shrink-0">
-        <div>
-          <h2 class="text-base font-semibold text-gray-800">批次組</h2>
-          <p v-if="!isLoading" class="text-xs text-gray-400 mt-0.5">
-            共 {{ batchExpenses.length }} 筆交易
-          </p>
+      <div class="shrink-0 px-6 pt-5 pb-4 border-b border-gray-100">
+        <div class="flex items-start justify-between">
+          <div>
+            <h2 class="text-lg font-semibold text-gray-900 tracking-tight">批次組</h2>
+            <div v-if="!isLoading" class="flex items-center gap-3 mt-0.5">
+              <span class="text-xs text-gray-400">
+                共 {{ batchExpenses.length }} 筆交易
+              </span>
+              <span
+                v-if="batchExpenses[0]?.group_id"
+                class="text-xs font-mono text-gray-300"
+              >
+                group: {{ shortGroupId(batchExpenses[0].group_id) }}
+              </span>
+            </div>
+          </div>
+          <button
+            @click="emit('close')"
+            class="text-gray-300 hover:text-gray-600 transition-colors mt-0.5"
+          >
+            <X :size="20" />
+          </button>
         </div>
-        <button
-          @click="emit('close')"
-          class="text-gray-400 hover:text-gray-600 transition-colors"
-        >
-          <X :size="20" />
-        </button>
+
+        <!-- Drag hint -->
+        <div v-if="!isLoading && batchExpenses.length > 1" class="mt-3 flex items-center gap-1.5 text-xs text-indigo-500 bg-indigo-50 px-3 py-1.5 rounded-lg w-fit">
+          <GripVertical :size="13" />
+          拖拉圖片卡片可將其移至其他交易欄位
+        </div>
       </div>
 
       <!-- Body -->
-      <div class="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+      <div class="flex-1 overflow-hidden relative">
 
         <!-- Loading -->
-        <div v-if="isLoading" class="flex items-center justify-center py-16 text-gray-400">
+        <div v-if="isLoading" class="flex items-center justify-center h-full text-gray-400">
           <Loader2 :size="28" class="animate-spin mr-2" />
           <span class="text-sm">載入中...</span>
         </div>
@@ -148,116 +190,155 @@ function otherExpenses(currentExpenseId) {
         <!-- 無批次資料 -->
         <div
           v-else-if="batchExpenses.length <= 1"
-          class="text-center py-12 text-gray-400"
+          class="flex flex-col items-center justify-center h-full text-gray-400 gap-3"
         >
-          <ArrowRightLeft :size="40" class="mx-auto mb-3 opacity-30" />
-          <p class="text-sm">此筆報帳無批次組資料</p>
-          <p class="text-xs mt-1">（無 group_id 或為單筆批次）</p>
+          <ArrowRightLeft :size="40" class="opacity-25" />
+          <div class="text-center">
+            <p class="text-sm font-medium">此筆報帳無批次組資料</p>
+            <p class="text-xs mt-1 text-gray-300">無 group_id 或為單筆批次</p>
+          </div>
         </div>
 
-        <!-- 批次列表 -->
-        <template v-else>
+        <!-- Kanban 欄 -->
+        <div
+          v-else
+          class="flex gap-4 overflow-x-auto h-full p-5 items-start"
+        >
           <div
             v-for="expense in batchExpenses"
             :key="expense.id"
-            class="border border-gray-200 rounded-lg overflow-hidden"
+            class="min-w-[230px] w-[230px] shrink-0 flex flex-col rounded-xl border border-gray-200 overflow-hidden bg-gray-50"
           >
-            <!-- Expense header -->
-            <div class="flex items-center gap-3 bg-gray-50 px-4 py-2.5 border-b border-gray-200">
-              <span class="font-mono text-sm font-semibold text-gray-800">
-                {{ expense.serial_number }}
-              </span>
-              <span
-                :class="STATUS_CLASS[expense.status] ?? 'bg-gray-100 text-gray-500'"
-                class="text-xs px-2 py-0.5 rounded font-medium"
-              >
-                {{ STATUS_LABEL[expense.status] ?? expense.status }}
-              </span>
-              <span v-if="expense.total_amount != null" class="text-sm text-gray-600 ml-auto">
-                NT$ {{ Number(expense.total_amount).toLocaleString() }}
-              </span>
+            <!-- 欄 Header -->
+            <div class="px-3 py-2.5 bg-white border-b border-gray-100">
+              <div class="flex items-center gap-1.5 mb-1">
+                <span
+                  class="w-2 h-2 rounded-full shrink-0"
+                  :class="STATUS_DOT[expense.status] ?? 'bg-gray-300'"
+                ></span>
+                <span class="font-mono text-xs font-semibold text-gray-800 truncate">
+                  {{ expense.serial_number }}
+                </span>
+                <!-- 目前查看的那筆標記 -->
+                <span
+                  v-if="expense.id === expenseId"
+                  class="ml-auto text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded shrink-0"
+                >
+                  目前
+                </span>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-[11px] text-gray-400">
+                  {{ STATUS_LABEL[expense.status] ?? expense.status }}
+                </span>
+                <span
+                  v-if="expense.total_amount != null"
+                  class="text-[11px] font-medium text-gray-600"
+                >
+                  NT${{ Number(expense.total_amount).toLocaleString() }}
+                </span>
+              </div>
             </div>
 
-            <!-- Images grid -->
-            <div class="p-3">
-              <div v-if="!expense.images || expense.images.length === 0" class="text-xs text-gray-400 py-2 text-center">
-                無圖片資料
-              </div>
-              <div v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <!-- Drop Zone -->
+            <div
+              class="flex-1 min-h-[160px] p-2 space-y-2 transition-all duration-150"
+              :class="{
+                'bg-indigo-50 ring-2 ring-indigo-300 ring-inset': dragOverExpenseId === expense.id,
+                'opacity-60': isMoving,
+              }"
+              @dragover="onDragOver($event, expense.id)"
+              @dragleave="onDragLeave"
+              @drop="onDrop($event, expense.id)"
+            >
+              <!-- 圖片卡片 -->
+              <template v-if="expense.images && expense.images.length > 0">
                 <div
                   v-for="img in expense.images"
                   :key="img.id"
-                  class="border border-gray-200 rounded-lg overflow-hidden bg-white"
+                  draggable="true"
+                  class="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-1.5 select-none transition-opacity"
+                  :class="{
+                    'cursor-grab active:cursor-grabbing': !isMoving,
+                    'opacity-40': dragging?.imgId === img.id,
+                    'cursor-not-allowed': isMoving,
+                  }"
+                  @dragstart="onDragStart($event, img, expense.id)"
+                  @dragend="onDragEnd"
                 >
-                  <!-- 圖片 -->
+                  <!-- Drag handle -->
+                  <GripVertical :size="14" class="text-gray-300 shrink-0" />
+
+                  <!-- 縮圖 -->
                   <img
                     :src="imgUrl(img.image_url)"
                     :alt="img.voucher_category || '圖片'"
-                    class="w-full h-28 object-cover"
+                    class="w-10 h-10 object-cover rounded border border-gray-100 shrink-0 pointer-events-none"
+                    draggable="false"
                   />
-                  <!-- 圖片資訊 -->
-                  <div class="p-2 space-y-1">
+
+                  <!-- 資訊 -->
+                  <div class="flex-1 min-w-0 space-y-0.5">
                     <div class="flex flex-wrap gap-1">
                       <span
-                        :class="img.is_voucher ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'"
-                        class="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                        :class="img.is_voucher
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-gray-100 text-gray-400'"
+                        class="text-[10px] font-medium px-1.5 py-0.5 rounded leading-tight"
                       >
                         {{ img.is_voucher ? '憑證' : '非憑證' }}
                       </span>
                       <span
                         v-if="img.voucher_category"
-                        class="text-[10px] bg-blue-100 text-blue-700 font-medium px-1.5 py-0.5 rounded"
+                        class="text-[10px] bg-blue-50 text-blue-600 font-medium px-1.5 py-0.5 rounded leading-tight"
                       >
                         {{ categoryLabel(img.voucher_category) }}
                       </span>
                     </div>
-
-                    <!-- 移至... 按鈕 -->
-                    <template v-if="movingImageId === img.id">
-                      <select
-                        v-model="moveTargetId"
-                        class="w-full text-xs border border-gray-300 rounded px-1.5 py-1 mt-1"
-                      >
-                        <option value="">— 選擇目標 —</option>
-                        <option
-                          v-for="target in otherExpenses(expense.id)"
-                          :key="target.id"
-                          :value="target.id"
-                        >
-                          {{ target.serial_number }}
-                        </option>
-                      </select>
-                      <div class="flex gap-1 mt-1">
-                        <button
-                          @click="confirmMove"
-                          :disabled="!moveTargetId || isMoving"
-                          class="flex-1 text-[10px] bg-indigo-600 text-white rounded py-1 hover:bg-indigo-700 disabled:opacity-50"
-                        >
-                          {{ isMoving ? '搬移中...' : '確認' }}
-                        </button>
-                        <button
-                          @click="cancelMove"
-                          class="flex-1 text-[10px] border border-gray-300 text-gray-600 rounded py-1 hover:bg-gray-50"
-                        >
-                          取消
-                        </button>
-                      </div>
-                    </template>
-                    <button
-                      v-else
-                      @click="openMove(img, expense.id)"
-                      class="w-full text-[10px] text-indigo-600 hover:text-indigo-800 underline mt-0.5 text-left"
+                    <div
+                      v-if="img.expense_category"
+                      class="text-[10px] text-gray-400 truncate"
                     >
-                      移至...
-                    </button>
+                      {{ img.expense_category }}
+                    </div>
                   </div>
                 </div>
+              </template>
+
+              <!-- 空欄提示 -->
+              <div
+                v-else
+                class="h-full min-h-[100px] flex items-center justify-center border-2 border-dashed rounded-lg transition-colors"
+                :class="dragOverExpenseId === expense.id
+                  ? 'border-indigo-300 text-indigo-400'
+                  : 'border-gray-200 text-gray-300'"
+              >
+                <span class="text-xs">拖放至此</span>
+              </div>
+
+              <!-- 拖拉進入提示（有圖片但 drag over 時的輔助提示）-->
+              <div
+                v-if="dragOverExpenseId === expense.id && expense.images && expense.images.length > 0"
+                class="flex items-center justify-center border-2 border-dashed border-indigo-300 rounded-lg py-2 text-xs text-indigo-400"
+              >
+                放開以移動至此
               </div>
             </div>
           </div>
-        </template>
+        </div>
 
+        <!-- 移動中 overlay -->
+        <div
+          v-if="isMoving"
+          class="absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-sm"
+        >
+          <div class="flex items-center gap-2 text-gray-500 text-sm bg-white border border-gray-200 shadow-lg rounded-xl px-4 py-3">
+            <Loader2 :size="18" class="animate-spin text-indigo-500" />
+            移動中...
+          </div>
+        </div>
       </div>
+
     </div>
   </div>
 </template>
