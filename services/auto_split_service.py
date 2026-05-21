@@ -21,7 +21,7 @@ from sqlalchemy import and_, select
 from core.database import SessionLocal
 from models.expense import Expense
 from models.user_state import UserState
-from services import expense_service, ocr_service, relation_service
+from services import expense_service, relation_service
 from schemas.ocr import VoucherOCRResult
 
 logger = logging.getLogger(__name__)
@@ -268,12 +268,11 @@ async def auto_split_process(
             line_user_id,
         )
 
-        # 並行 OCR（Semaphore 限速 3 張同時，含指數退避 retry）
-        ocr_tasks = [
-            ocr_service.classify_and_extract_with_retry(entry.path)
-            for entry in entries
+        # Webhook 路徑不執行 OCR；統一以空殼 stub 建立 NEEDS_MANUAL_REVIEW 報帳
+        ocr_results: list[VoucherOCRResult] = [
+            VoucherOCRResult(success=False, is_voucher=False)
+            for _ in entries
         ]
-        ocr_results: list[VoucherOCRResult] = list(await asyncio.gather(*ocr_tasks))
 
         # 兩階段切割：取得群組 + 孤立物品圖
         groups, orphan_paths = multi_split_logic_v2(entries, ocr_results)

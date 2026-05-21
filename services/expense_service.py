@@ -550,7 +550,12 @@ def _pick_primary_fields(ocr_results: list[VoucherOCRResult]) -> dict:
     elif cat == "POSTAGE":
         kwargs["item_description"] = primary.postage_type
 
-    # ── TRANSPORTATION：僅取通用欄位 ──────────────────────
+    # ── TRANSPORTATION ─────────────────────────────────────
+    elif cat == "TRANSPORTATION":
+        if primary.route_from and primary.route_to:
+            kwargs["item_description"] = f"{primary.route_from} → {primary.route_to}"
+        elif primary.route_from or primary.route_to:
+            kwargs["item_description"] = primary.route_from or primary.route_to
 
     return {k: v for k, v in kwargs.items() if v is not None}
 
@@ -692,8 +697,10 @@ def create_batch_expense(
             item_images.append(path_str)
 
     # ── 6. INSERT Expense（含重試機制）────────────────────────────
+    ocr_item_description: str | None = primary_fields.get("item_description")
     effective_item_description: str | None = (
-        user_description.strip() if user_description and user_description.strip() else None
+        user_description.strip() if user_description and user_description.strip()
+        else ocr_item_description
     )
 
     for _attempt in range(5):

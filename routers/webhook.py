@@ -24,7 +24,6 @@ from core.database import SessionLocal, get_db
 from models.user_state import UserState
 from services import auto_split_service, auto_split_timer, expense_service, line_service, roster_service
 from services.expense_service import create_batch_expense
-from services.ocr_service import classify_and_extract_with_retry
 from schemas.ocr import VoucherOCRResult
 
 logger = logging.getLogger(__name__)
@@ -65,14 +64,11 @@ async def _process_batch(
             for img in pending_images
         ]
 
-        ocr_tasks = [classify_and_extract_with_retry(img) for img in pending_images]
-        ocr_results: list[VoucherOCRResult] = list(await asyncio.gather(*ocr_tasks))
-        logger.info(
-            "_process_batch OCR 完成 user=%s 成功=%d 失敗=%d",
-            line_user_id,
-            sum(1 for r in ocr_results if r.success),
-            sum(1 for r in ocr_results if not r.success),
-        )
+        # Webhook 路徑不執行 OCR；統一建立 NEEDS_MANUAL_REVIEW 報帳
+        ocr_results: list[VoucherOCRResult] = [
+            VoucherOCRResult(success=False, is_voucher=False)
+            for _ in pending_images
+        ]
 
         # 以憑證為切割點，分割成多個群組
         groups, orphan_paths = multi_split_logic_v2(entries, ocr_results)

@@ -161,6 +161,10 @@ async def add_image(
     try:
         ocr_result: VoucherOCRResult = await ocr_service.classify_and_extract_with_retry(image_path)
         img_record.is_voucher = ocr_result.is_voucher if ocr_result.success else None
+        if ocr_result.success:
+            img_record.ocr_result = ocr_result.model_dump_json(
+                exclude={"success", "error", "raw_response"}
+            )
         db.commit()
         db.refresh(img_record)
         return img_record, True, img_record.is_voucher
@@ -350,15 +354,24 @@ async def submit_session(
         for img in images
     ]
 
-    # 準備 OCR 結果（已儲存在 SessionImage.is_voucher；此處組建最小 VoucherOCRResult）
-    # 完整 OCR 結果在 add_image 時已寫入 SessionImage，submit 時只需 is_voucher 做切割
-    ocr_stubs: list[VoucherOCRResult] = [
-        VoucherOCRResult(
+    # 從 SessionImage.ocr_result 還原完整 VoucherOCRResult，
+    # 確保 create_batch_expense 能正確萃取金額、發票號碼等欄位
+    ocr_stubs: list[VoucherOCRResult] = []
+    for img in images:
+        if img.ocr_result:
+            try:
+                r = VoucherOCRResult.model_validate_json(img.ocr_result)
+                ocr_stubs.append(r)
+                continue
+            except Exception as exc:
+                logger.warning(
+                    "liff_service.submit_session: 還原 OCR JSON 失敗 session=%s seq=%d: %s",
+                    session_id, img.sequence_order, exc,
+                )
+        ocr_stubs.append(VoucherOCRResult(
             success=img.is_voucher is not None,
             is_voucher=img.is_voucher if img.is_voucher is not None else False,
-        )
-        for img in images
-    ]
+        ))
 
     # 兩階段切割
     groups_raw, orphan_paths = multi_split_logic_v2(entries, ocr_stubs)

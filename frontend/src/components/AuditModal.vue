@@ -350,6 +350,28 @@ function parseOcrAmount(ocrResult) {
   }
 }
 
+// 從 OCR JSON 字串中解析所有可顯示的細項欄位
+function parseOcrFields(ocrResult) {
+  if (!ocrResult) return null
+  try {
+    const p = typeof ocrResult === 'string' ? JSON.parse(ocrResult) : ocrResult
+    return {
+      expense_date: p?.expense_date ?? null,
+      invoice_number: p?.invoice_number ?? null,
+      seller_name: p?.seller_name ?? null,
+      item_description: p?.item_description ?? null,
+      route: p?.route_from && p?.route_to
+        ? `${p.route_from} → ${p.route_to}`
+        : (p?.route_from || p?.route_to || null),
+      overall_confidence: p?.overall_confidence != null
+        ? Math.round(p.overall_confidence * 100)
+        : null,
+    }
+  } catch {
+    return null
+  }
+}
+
 // 子圖片 voucher_category 對應中文
 function getCategoryLabel(code) {
   if (!code) return null
@@ -944,10 +966,35 @@ function formatDateTime(val) {
                           >
                             {{ img.expense_category }}
                           </span>
-                          <!-- OCR 金額摘要 -->
-                          <div v-if="parseOcrAmount(img.ocr_result) !== null" class="text-sm text-gray-700">
-                            金額：<span class="font-medium">NT$ {{ formatAmount(parseOcrAmount(img.ocr_result)) }}</span>
-                          </div>
+                          <!-- OCR 細項 -->
+                          <template v-if="parseOcrFields(img.ocr_result)">
+                            <div class="mt-1 space-y-0.5 text-xs text-gray-600">
+                              <div v-if="parseOcrAmount(img.ocr_result) !== null">
+                                金額：<span class="font-medium text-gray-800">NT$ {{ formatAmount(parseOcrAmount(img.ocr_result)) }}</span>
+                              </div>
+                              <div v-if="parseOcrFields(img.ocr_result).expense_date">
+                                費用日期：<span class="font-medium text-gray-800">{{ parseOcrFields(img.ocr_result).expense_date }}</span>
+                              </div>
+                              <div v-if="parseOcrFields(img.ocr_result).invoice_number">
+                                發票號碼：<span class="font-medium text-gray-800">{{ parseOcrFields(img.ocr_result).invoice_number }}</span>
+                              </div>
+                              <div v-if="parseOcrFields(img.ocr_result).seller_name">
+                                賣方：<span class="font-medium text-gray-800">{{ parseOcrFields(img.ocr_result).seller_name }}</span>
+                              </div>
+                              <div v-if="parseOcrFields(img.ocr_result).route">
+                                路線：<span class="font-medium text-gray-800">{{ parseOcrFields(img.ocr_result).route }}</span>
+                              </div>
+                              <div v-if="parseOcrFields(img.ocr_result).item_description">
+                                品項：<span class="font-medium text-gray-800">{{ parseOcrFields(img.ocr_result).item_description }}</span>
+                              </div>
+                              <div v-if="parseOcrFields(img.ocr_result).overall_confidence !== null">
+                                OCR 信心：<span
+                                  :class="parseOcrFields(img.ocr_result).overall_confidence >= 80 ? 'text-green-600' : parseOcrFields(img.ocr_result).overall_confidence >= 60 ? 'text-yellow-600' : 'text-red-500'"
+                                  class="font-medium"
+                                >{{ parseOcrFields(img.ocr_result).overall_confidence }}%</span>
+                              </div>
+                            </div>
+                          </template>
                           <!-- 編輯按鈕 -->
                           <button
                             @click="startEditImage(img)"
