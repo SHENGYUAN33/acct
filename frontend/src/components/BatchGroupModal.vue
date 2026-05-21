@@ -16,6 +16,7 @@ const batchExpenses = ref([])
 const dragging = ref(null)         // { imgId, sourceExpenseId }
 const dragOverExpenseId = ref(null)
 const isMoving = ref(false)
+const pendingMove = ref(null)      // { imgId, sourceExpenseId, targetExpenseId, targetSerial }
 
 const STATUS_LABEL = {
   PENDING: '待審核',
@@ -69,7 +70,14 @@ async function loadBatch() {
   isLoading.value = true
   try {
     const res = await fetchBatchExpenses(props.expenseId)
-    batchExpenses.value = res.data?.data?.expenses ?? []
+    const expenses = res.data?.data?.expenses ?? []
+    // 「目前」那筆（觸發 Modal 的 expense）固定排第一欄
+    expenses.sort((a, b) => {
+      if (a.id === props.expenseId) return -1
+      if (b.id === props.expenseId) return 1
+      return 0
+    })
+    batchExpenses.value = expenses
   } catch (err) {
     console.error('[BatchGroupModal] 載入批次失敗：', err)
     toast.error('批次資料載入失敗')
@@ -109,17 +117,31 @@ function onDragEnd() {
   dragOverExpenseId.value = null
 }
 
-async function onDrop(event, targetExpenseId) {
+function onDrop(event, targetExpenseId) {
   event.preventDefault()
   if (!dragging.value || dragging.value.sourceExpenseId === targetExpenseId) {
     dragging.value = null
     dragOverExpenseId.value = null
     return
   }
-  isMoving.value = true
   const { imgId, sourceExpenseId } = dragging.value
+  const targetExpense = batchExpenses.value.find(e => e.id === targetExpenseId)
   dragging.value = null
   dragOverExpenseId.value = null
+  // 暫存待確認動作，顯示確認對話框
+  pendingMove.value = {
+    imgId,
+    sourceExpenseId,
+    targetExpenseId,
+    targetSerial: targetExpense?.serial_number ?? targetExpenseId,
+  }
+}
+
+async function executePendingMove() {
+  if (!pendingMove.value) return
+  const { imgId, sourceExpenseId, targetExpenseId } = pendingMove.value
+  pendingMove.value = null
+  isMoving.value = true
   try {
     await moveExpenseImage(sourceExpenseId, imgId, targetExpenseId)
     toast.success('圖片已移動')
@@ -130,6 +152,10 @@ async function onDrop(event, targetExpenseId) {
   } finally {
     isMoving.value = false
   }
+}
+
+function cancelPendingMove() {
+  pendingMove.value = null
 }
 
 function isDraggingFromThisColumn(expenseId) {
@@ -339,6 +365,40 @@ function isDraggingFromThisColumn(expenseId) {
         </div>
       </div>
 
+    </div>
+
+    <!-- 移動確認對話框（z-[60] 蓋在 Modal 之上）-->
+    <div
+      v-if="pendingMove"
+      class="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4"
+      @click.self="cancelPendingMove"
+    >
+      <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+        <div class="flex items-center gap-2 text-gray-800 font-semibold text-base">
+          <ArrowRightLeft :size="18" class="text-indigo-500 shrink-0" />
+          確認移動照片？
+        </div>
+        <p class="text-sm text-gray-600 leading-relaxed">
+          此操作將把照片移至
+          <span class="font-medium text-gray-900">{{ pendingMove.targetSerial }}</span>
+          欄位，移動後可再次拖拉調整位置。
+        </p>
+        <div class="flex justify-end gap-2 pt-1">
+          <button
+            @click="cancelPendingMove"
+            class="px-4 py-2 text-sm border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50"
+          >
+            取消
+          </button>
+          <button
+            @click="executePendingMove"
+            :disabled="isMoving"
+            class="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {{ isMoving ? '移動中...' : '確定移動' }}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
