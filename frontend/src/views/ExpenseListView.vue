@@ -4,17 +4,32 @@ import { useExpenseStore } from '../stores/expenseStore'
 import FilterPanel from '../components/FilterPanel.vue'
 import ExpenseTable from '../components/ExpenseTable.vue'
 import Pagination from '../components/Pagination.vue'
-import { Plus, Download, ChevronDown, Loader2, Zap, Settings } from 'lucide-vue-next'
-import { processPendingNow } from '../api/expenseApi'
+import { Plus, Download, ChevronDown, Loader2, Zap, Settings, PackageX } from 'lucide-vue-next'
+import { processPendingNow, fetchWaitingReturns } from '../api/expenseApi'
 import SchedulerConfigModal from '../components/SchedulerConfigModal.vue'
+import WaitingReturnModal from '../components/WaitingReturnModal.vue'
 
 const store = useExpenseStore()
 const isExporting = ref(false)
 const isProcessing = ref(false)
 const processResult = ref(null) // { type: 'success' | 'error', message: string }
 const showSchedulerModal = ref(false)
+const showWaitingReturnModal = ref(false)
+const waitingReturnCount = ref(0)
 
-onMounted(() => store.fetchExpenses())
+async function loadWaitingReturnCount() {
+  try {
+    const res = await fetchWaitingReturns()
+    waitingReturnCount.value = res.data?.data?.total ?? 0
+  } catch {
+    waitingReturnCount.value = 0
+  }
+}
+
+onMounted(() => {
+  store.fetchExpenses()
+  loadWaitingReturnCount()
+})
 
 async function handleExport() {
   if (isExporting.value) return
@@ -101,6 +116,19 @@ async function handleProcessPending() {
         <Settings :size="14" />
         排程設定
       </button>
+
+      <button
+        @click="showWaitingReturnModal = true"
+        class="relative flex items-center gap-1.5 px-3 py-1.5 border border-purple-300 hover:bg-purple-50 text-purple-600 rounded-full text-sm font-medium transition-colors"
+        title="待退貨補件管理"
+      >
+        <PackageX :size="14" />
+        待退貨
+        <span
+          v-if="waitingReturnCount > 0"
+          class="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center bg-purple-500 text-white text-[10px] font-bold rounded-full px-1"
+        >{{ waitingReturnCount }}</span>
+      </button>
     </div>
 
     <!-- 批次處理結果提示 -->
@@ -150,6 +178,13 @@ async function handleProcessPending() {
     <SchedulerConfigModal
       v-if="showSchedulerModal"
       @close="showSchedulerModal = false"
+    />
+
+    <!-- 待退貨管理 Modal -->
+    <WaitingReturnModal
+      v-if="showWaitingReturnModal"
+      @close="showWaitingReturnModal = false"
+      @count-changed="() => { loadWaitingReturnCount(); store.fetchExpenses() }"
     />
   </div>
 </template>

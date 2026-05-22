@@ -66,6 +66,10 @@ async def serve_liff_root(request: Request) -> Response:
     with open(_liff_index, "r", encoding="utf-8") as f:
         content = f.read()
     content = content.replace("'{{LIFF_API_BASE}}'", f"'{api_base}'")
+    content = content.replace(
+        "'{{ENABLE_WAITING_RETURN_LIFF_BUTTON}}'",
+        "true" if settings.enable_waiting_return_liff_button else "false",
+    )
 
     return Response(
         content=content,

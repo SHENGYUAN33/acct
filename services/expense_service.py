@@ -182,10 +182,14 @@ def list_expenses(
     page: int = 1,
     page_size: int = 20,
     include_inactive: bool = False,
+    q: str | None = None,
+    referenced_invoice_number: str | None = None,
 ) -> tuple[int, list[Expense]]:
     """Return (total_count, expenses) with optional filters and pagination.
 
     include_inactive=False（預設）：排除 is_active=False 的作廢記錄，避免重覆計算。
+    q：模糊搜尋案件編號或上傳者姓名（ILIKE）。
+    referenced_invoice_number：精確篩選補件所參考的原始憑證號碼。
     """
     stmt = select(Expense).order_by(Expense.created_at.desc())
 
@@ -197,6 +201,13 @@ def list_expenses(
         stmt = stmt.where(Expense.created_at >= date_from)
     if date_to:
         stmt = stmt.where(Expense.created_at <= date_to)
+    if q:
+        pattern = f"%{q}%"
+        stmt = stmt.where(
+            (Expense.serial_number.ilike(pattern)) | (Expense.uploader_name.ilike(pattern))
+        )
+    if referenced_invoice_number:
+        stmt = stmt.where(Expense.referenced_invoice_number == referenced_invoice_number)
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     items = db.scalars(stmt.offset((page - 1) * page_size).limit(page_size)).all()
@@ -254,6 +265,16 @@ def delete_expense(db: Session, expense_id: uuid.UUID) -> bool:
     expense = get_expense(db, expense_id)
     if not expense:
         return False
+    # 若為有發票號碼的憑證（WAITING_RETURN），連帶刪除所有以此發票號碼為 referenced_invoice_number 的 RETURN_SUPPLEMENT 補件
+    if expense.invoice_number:
+        supplements = list(db.scalars(
+            select(Expense).where(
+                Expense.relation_type == "RETURN_SUPPLEMENT",
+                Expense.referenced_invoice_number == expense.invoice_number,
+            )
+        ).all())
+        for sup in supplements:
+            db.delete(sup)
     db.delete(expense)
     db.commit()
     return True

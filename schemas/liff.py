@@ -108,6 +108,10 @@ class SubmitSessionRequest(BaseModel):
         default_factory=list,
         description="各費用群組的文字備註，可空清單表示無備註",
     )
+    waiting_return_ref: str | None = Field(
+        default=None,
+        description="待退貨原始憑證號碼（LIFF Mode 2 顯式按鈕模式；None 表示非退貨上傳）",
+    )
 
 
 class CreatedExpenseItem(BaseModel):

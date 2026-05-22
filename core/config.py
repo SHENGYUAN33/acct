@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     # 關閉時，維持原有 Onboarding 流程（手動輸入姓名 + 選擇組別）
     enable_roster_binding: bool = False
 
+    # 功能開關：待退貨 — 備註文字偵測模式
+    # 啟用後，備註含「待退貨 AB-12345678」格式時，自動標記 relation_type=RETURN_SUPPLEMENT
+    enable_waiting_return_text_mode: bool = False
+    # 功能開關：待退貨 — LIFF 顯式按鈕模式
+    # 啟用後，LIFF 確認頁顯示「此上傳為退貨物品照」toggle，提交時帶入 waiting_return_ref
+    enable_waiting_return_liff_button: bool = False
+
     # 功能開關：自動切割（60 秒無操作自動送出）
     # ⚠️  僅適用於單 Worker 模式（uvicorn --workers 1），多 Worker 時必須設為 False
     enable_auto_split: bool = False

@@ -415,6 +415,26 @@
       ✅ 已辨識為 <strong id="expense-count-text">0</strong> 筆費用，請確認分組正確，並視需要填寫備注
     </div>
     <div id="expense-cards"></div>
+
+    <!-- 待退貨標記區塊（enable_waiting_return_liff_button=true 時顯示） -->
+    <div id="waiting-return-section" style="display:none; margin-top:16px; background:#faf5ff; border:1px solid #d8b4fe; border-radius:12px; padding:16px;">
+      <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:14px; font-weight:600; color:#7e22ce;">
+        <input type="checkbox" id="is-waiting-return" style="width:18px; height:18px; accent-color:#7c3aed;" />
+        此上傳為退貨物品照
+      </label>
+      <div id="waiting-return-input-wrap" style="display:none; margin-top:12px;">
+        <label style="font-size:13px; color:#6b7280; display:block; margin-bottom:6px;">原始憑證號碼（格式：AB-12345678）</label>
+        <input
+          type="text"
+          id="waiting-return-invoice"
+          placeholder="AB-12345678"
+          maxlength="11"
+          style="width:100%; box-sizing:border-box; border:1px solid #c4b5fd; border-radius:8px; padding:10px 12px; font-size:14px; font-family:monospace; outline:none;"
+        />
+        <p style="font-size:11px; color:#9ca3af; margin-top:6px;">輸入實體憑證上的號碼，方便審核人員配對退貨物品照</p>
+      </div>
+    </div>
+
     <div class="mt-24">
       <button class="btn btn-success" id="btn-confirm">全部確認送出</button>
     </div>
@@ -444,6 +464,7 @@ window.addEventListener('pageshow', function (ev) {
 // ════════════════════════════════
 const LIFF_ID   = '2010115806-blToY7nZ'          // 填入你的 LIFF ID（LINE Developers Console 取得）
 const API_BASE  = '{{LIFF_API_BASE}}'            // 由 server 啟動時注入，勿手動修改此行
+const ENABLE_WAITING_RETURN_LIFF_BUTTON = '{{ENABLE_WAITING_RETURN_LIFF_BUTTON}}'  // 由 server 注入
 
 // ════════════════════════════════
 //  狀態
@@ -453,6 +474,32 @@ let sessionId   = ''
 let photos      = []  // { localId, file, preview, imageId, isVoucher, manuallySet, uploaded, error }
 let previewData = null  // GET /preview 回傳
 let isUploading = false
+
+// 待退貨功能：依 server 注入的 flag 決定是否顯示 UI
+let _wrListenerAdded = false  // 防止每次進入 Step 3 重複累積 change 監聽器
+
+function initWaitingReturnSection() {
+  if (ENABLE_WAITING_RETURN_LIFF_BUTTON !== true && ENABLE_WAITING_RETURN_LIFF_BUTTON !== 'true') return
+  const section   = document.getElementById('waiting-return-section')
+  const checkbox  = document.getElementById('is-waiting-return')
+  const inputWrap = document.getElementById('waiting-return-input-wrap')
+  const invoice   = document.getElementById('waiting-return-invoice')
+
+  if (section) section.style.display = 'block'
+
+  // 每次進入 Step 3 重置狀態，避免殘留上次的值
+  if (checkbox)  checkbox.checked     = false
+  if (inputWrap) inputWrap.style.display = 'none'
+  if (invoice)   invoice.value        = ''
+
+  // 只加一次 change 監聽器，避免多次呼叫累積
+  if (!_wrListenerAdded && checkbox && inputWrap) {
+    checkbox.addEventListener('change', () => {
+      inputWrap.style.display = checkbox.checked ? 'block' : 'none'
+    })
+    _wrListenerAdded = true
+  }
+}
 
 // ════════════════════════════════
 //  DOM
@@ -800,6 +847,7 @@ async function fetchPreview(bar, msgEl) {
     setTimeout(() => {
       buildConfirmPage()
       showStep(3)
+      initWaitingReturnSection()
     }, 300)
   } catch (err) {
     const _debugUrl = API_BASE + `/liff/sessions/${sessionId}/preview`
@@ -950,9 +998,15 @@ async function confirmSubmit() {
     group_index: +k, description: v
   }))
 
+  // 待退貨標記（Mode 2: LIFF 顯式按鈕）
+  const isWaitingReturn = document.getElementById('is-waiting-return')?.checked ?? false
+  const waitingReturnInvoice = (document.getElementById('waiting-return-invoice')?.value ?? '').trim()
+  const waitingReturnRef = (isWaitingReturn && waitingReturnInvoice) ? waitingReturnInvoice : null
+
   try {
     const result = await apiPost(`/liff/sessions/${sessionId}/submit`, {
-      group_descriptions: desc
+      group_descriptions: desc,
+      ...(waitingReturnRef ? { waiting_return_ref: waitingReturnRef } : {}),
     })
 
     const list = document.getElementById('serial-list')
@@ -1010,6 +1064,14 @@ async function resetAll() {
   btnConfirm.disabled    = false
   btnConfirm.textContent = '全部確認送出'
   btnUpload.disabled     = true
+
+  // 清除待退貨相關狀態，避免殘留上次的輸入值
+  const wrCheckbox = document.getElementById('is-waiting-return')
+  if (wrCheckbox) wrCheckbox.checked = false
+  const wrInvoice = document.getElementById('waiting-return-invoice')
+  if (wrInvoice) wrInvoice.value = ''
+  const wrInputWrap = document.getElementById('waiting-return-input-wrap')
+  if (wrInputWrap) wrInputWrap.style.display = 'none'
 
   // 重新建立 session
   try {

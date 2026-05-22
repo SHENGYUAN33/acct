@@ -142,6 +142,16 @@ export const updateExpenseImage = (expenseId, imageId, payload) =>
 export const fetchBatchExpenses = (expenseId) =>
   apiClient.get(`/api/v1/expenses/${expenseId}/batch`)
 
+/**
+ * GET /api/v1/expenses/waiting-returns
+ * 取得所有待退貨管理案件：
+ *   cases = [{ invoice: ExpenseWithImages, supplement: ExpenseWithImages | null }]
+ *   orphan_supplements = ExpenseWithImages[]（有補件但找不到原始憑證）
+ *   total = WAITING_RETURN 案件數（用於 badge）
+ */
+export const fetchWaitingReturns = () =>
+  apiClient.get('/api/v1/expenses/waiting-returns')
+
 export const moveExpenseImage = (expenseId, imageId, targetExpenseId) =>
   apiClient.post(`/api/v1/expenses/${expenseId}/images/${imageId}/move`, {
     target_expense_id: targetExpenseId,

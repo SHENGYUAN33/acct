@@ -232,4 +232,5 @@ async def submit_session(
         db=db,
         session_id=session_id,
         group_descriptions=desc_map,
+        waiting_return_ref=body.waiting_return_ref,
     )

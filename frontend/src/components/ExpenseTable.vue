@@ -1,7 +1,7 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useExpenseStore } from '../stores/expenseStore'
-import { getExpense } from '../api/expenseApi'
+import { getExpense, fetchExpenses } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
 import { Pencil, Trash2, Plus, ChevronsUpDown, ChevronRight, Link2, GripVertical } from 'lucide-vue-next'
 import ConfirmModal from './ConfirmModal.vue'
@@ -9,12 +9,27 @@ import BatchGroupModal from './BatchGroupModal.vue'
 
 const store = useExpenseStore()
 
+const BACKEND_BASE = 'http://localhost:8000'
+function normalizeImageUrls(exp) {
+  if (!exp) return exp
+  return {
+    ...exp,
+    image_url: (exp.image_url || []).map(u => u.startsWith('http') ? u : `${BACKEND_BASE}/${u}`),
+    item_image_url: (exp.item_image_url || []).map(u => u.startsWith('http') ? u : `${BACKEND_BASE}/${u}`),
+  }
+}
+
 // 展開的列 ID 集合（元件本地狀態，與篩選無關）
 const expandedRows = ref(new Set())
 // 已載入的原單資料快取（key: 新單 expense.id, value: 原單 expense data）
 const parentCache = ref({})
 // 載入中的 expense id 集合
 const fetchingParent = ref(new Set())
+// WAITING_RETURN 補件快取（key: invoice expense.id, value: 補件 expense | null | 'loading' | 'error'）
+const supplementCache = ref({})
+
+// store 刷新後清除 supplementCache，確保展開時拿到最新補件狀態
+watch(() => store.expenses, () => { supplementCache.value = {} })
 
 // 批次組 Modal
 const batchModalExpenseId = ref(null)
@@ -28,6 +43,18 @@ async function toggleExpand(expense) {
     next.delete(id)
   } else {
     next.add(id)
+    // 有發票號碼的憑證（含 WAITING_RETURN 與已結清後變 PENDING）：尚未快取則抓取配對補件
+    if (expense.invoice_number && !(id in supplementCache.value)) {
+      supplementCache.value = { ...supplementCache.value, [id]: 'loading' }
+      try {
+        const res = await fetchExpenses({ referenced_invoice_number: expense.invoice_number, page_size: 5 })
+        const items = res.data?.data?.items ?? []
+        const sup = items.find(e => e.relation_type === 'RETURN_SUPPLEMENT') ?? null
+        supplementCache.value = { ...supplementCache.value, [id]: normalizeImageUrls(sup) }
+      } catch {
+        supplementCache.value = { ...supplementCache.value, [id]: 'error' }
+      }
+    }
     // VOID_REPLACE：尚未快取則自動抓取原單
     if ((expense.relation_type === 'VOID_REPLACE' || expense.relation_type === 'CREDIT_NOTE') && expense.parent_id && !parentCache.value[id]) {
       const fetching = new Set(fetchingParent.value)
@@ -92,6 +119,13 @@ function formatAmount(amount) {
   if (amount === null || amount === undefined) return '-'
   return `$${Number(amount).toLocaleString()}`
 }
+
+// 已配對的 RETURN_SUPPLEMENT 不在主表格顯示（改由父憑證展開子列呈現）
+const visibleExpenses = computed(() =>
+  store.paginatedExpenses.filter(e =>
+    !(e.relation_type === 'RETURN_SUPPLEMENT' && e.referenced_invoice_number)
+  )
+)
 
 // ── 拖曳排序 ─────────────────────────────────────────────────────
 const draggedId = ref(null)   // 正在被拖曳的列 ID
@@ -200,7 +234,7 @@ function onDragEnd() {
 
         <!-- 表格主體 -->
         <tbody>
-          <template v-for="expense in store.paginatedExpenses" :key="expense.id">
+          <template v-for="expense in visibleExpenses" :key="expense.id">
             <!-- 主列 -->
             <tr
               class="border-b border-gray-100 transition-colors"
@@ -261,15 +295,6 @@ function onDragEnd() {
                     class="text-[10px] px-1 py-0.5 rounded bg-yellow-100 text-yellow-700"
                     title="自動送出"
                   >⏱</span>
-                  <!-- 批次組 Badge -->
-                  <button
-                    v-if="expense.group_id"
-                    @click.stop="openBatchModal(expense)"
-                    class="text-[10px] px-1 py-0.5 rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition-colors"
-                    title="查看批次組照片"
-                  >
-                    批次
-                  </button>
                 </div>
               </td>
 
@@ -309,8 +334,9 @@ function onDragEnd() {
                     <Trash2 :size="13" />
                   </button>
                   <button
+                    @click="openBatchModal(expense)"
                     class="w-7 h-7 bg-green-500 hover:bg-green-600 text-white rounded flex items-center justify-center transition-colors"
-                    title="新增"
+                    title="批次組"
                   >
                     <Plus :size="13" />
                   </button>
@@ -508,10 +534,175 @@ function onDragEnd() {
                 </div>
               </td>
             </tr>
+
+            <!-- 待退貨補件子列：載入中 -->
+            <tr
+              v-if="expandedRows.has(expense.id) && expense.status === 'WAITING_RETURN' && supplementCache[expense.id] === 'loading'"
+              class="border-b border-dashed border-purple-200"
+            >
+              <td colspan="15" class="bg-purple-50 px-6 py-2.5">
+                <div class="flex items-center gap-1.5 text-xs text-gray-400">
+                  <svg class="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10" class="opacity-25"/>
+                    <path d="M4 12a8 8 0 018-8" class="opacity-75"/>
+                  </svg>
+                  載入補件資料中…
+                </div>
+              </td>
+            </tr>
+
+            <!-- 待退貨補件子列：錯誤 -->
+            <tr
+              v-if="expandedRows.has(expense.id) && expense.status === 'WAITING_RETURN' && supplementCache[expense.id] === 'error'"
+              class="border-b border-dashed border-purple-200"
+            >
+              <td colspan="15" class="bg-purple-50 px-6 py-2.5 text-xs text-red-400">無法載入補件資料</td>
+            </tr>
+
+            <!-- 待退貨補件子列：尚無補件（僅 WAITING_RETURN 顯示此提示） -->
+            <tr
+              v-if="expandedRows.has(expense.id) && expense.status === 'WAITING_RETURN' && supplementCache[expense.id] === null"
+              class="border-b border-dashed border-purple-200"
+            >
+              <td colspan="15" class="bg-purple-50 px-6 py-2.5">
+                <div class="text-xs text-purple-400 opacity-60 flex items-center gap-1">
+                  <Link2 :size="11" />
+                  待退貨補件：尚未收到對應物品照
+                </div>
+              </td>
+            </tr>
+
+            <!-- 待退貨補件子列：完整列（有補件時顯示，含配對完成後 PENDING 狀態） -->
+            <tr
+              v-if="expandedRows.has(expense.id) && supplementCache[expense.id] && supplementCache[expense.id] !== 'loading' && supplementCache[expense.id] !== 'error'"
+              class="border-b border-dashed border-purple-200 bg-purple-50"
+            >
+              <!-- td1: 拖曳佔位 -->
+              <td class="w-5 px-1 py-1.5"></td>
+
+              <!-- td2: 關係圖示 -->
+              <td class="w-6 px-1 py-1.5 text-center">
+                <Link2 :size="12" class="text-purple-300 mx-auto" />
+              </td>
+
+              <!-- td3: Checkbox（空） -->
+              <td class="w-8 px-2 py-1.5"></td>
+
+              <!-- td4: 案件編號 -->
+              <td class="px-3 py-1.5 text-gray-700 font-medium whitespace-nowrap font-mono text-xs">
+                {{ supplementCache[expense.id].serial_number }}
+              </td>
+
+              <!-- td5: 狀態燈號 -->
+              <td class="px-3 py-1.5">
+                <span
+                  class="inline-block w-3 h-3 rounded-full"
+                  :class="getStatusConfig(supplementCache[expense.id].status).dot"
+                  :title="getStatusConfig(supplementCache[expense.id].status).label"
+                ></span>
+              </td>
+
+              <!-- td6: 上傳人 -->
+              <td class="px-3 py-1.5 text-gray-700 whitespace-nowrap text-xs">
+                {{ supplementCache[expense.id].uploader_name }}
+              </td>
+
+              <!-- td7: 上傳者組別 -->
+              <td class="px-3 py-1.5 text-gray-600 whitespace-nowrap text-xs">
+                {{ supplementCache[expense.id].uploader_dept || '-' }}
+              </td>
+
+              <!-- td8: 費用提報者 -->
+              <td class="px-3 py-1.5 text-gray-700 whitespace-nowrap text-xs">
+                {{ supplementCache[expense.id].submitter_name || '-' }}
+              </td>
+
+              <!-- td9: 操作 -->
+              <td class="px-3 py-1.5 whitespace-nowrap">
+                <div class="flex items-center gap-1.5">
+                  <button
+                    @click="store.openAudit(supplementCache[expense.id])"
+                    class="w-7 h-7 bg-blue-500 hover:bg-blue-600 text-white rounded flex items-center justify-center transition-colors"
+                    title="編輯 / 審核"
+                  >
+                    <Pencil :size="13" />
+                  </button>
+                  <button
+                    @click="handleDelete(supplementCache[expense.id])"
+                    class="w-7 h-7 bg-red-500 hover:bg-red-600 text-white rounded flex items-center justify-center transition-colors"
+                    title="刪除"
+                  >
+                    <Trash2 :size="13" />
+                  </button>
+                </div>
+              </td>
+
+              <!-- td10: 審核狀態 -->
+              <td class="px-3 py-1.5 whitespace-nowrap">
+                <div class="flex items-center gap-1 flex-wrap">
+                  <span
+                    class="text-xs font-medium"
+                    :class="getStatusConfig(supplementCache[expense.id].status).textColor"
+                  >{{ getStatusConfig(supplementCache[expense.id].status).label }}</span>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-600 border border-purple-200">補件</span>
+                </div>
+              </td>
+
+              <!-- td11: 細項 -->
+              <td class="px-3 py-1.5 text-gray-400 text-xs">-</td>
+
+              <!-- td12: 憑證類別 -->
+              <td class="px-3 py-1.5 whitespace-nowrap">
+                <template v-if="supplementCache[expense.id].voucher_categories?.length">
+                  <span
+                    v-for="cat in supplementCache[expense.id].voucher_categories"
+                    :key="cat"
+                    class="inline-block text-xs px-1.5 py-0.5 rounded mr-1 mb-0.5 bg-blue-100 text-blue-700"
+                  >{{ cat }}</span>
+                </template>
+                <span v-else class="text-gray-400 text-xs">-</span>
+              </td>
+
+              <!-- td13: 費用影像 -->
+              <td class="px-3 py-1.5">
+                <div
+                  v-if="supplementCache[expense.id].image_url?.length"
+                  class="w-10 h-10 rounded overflow-hidden border border-purple-200"
+                >
+                  <img :src="supplementCache[expense.id].image_url[0]" alt="費用影像" class="w-full h-full object-cover" />
+                </div>
+                <div v-else class="w-10 h-10 bg-gray-200 rounded border border-gray-300 flex items-center justify-center">
+                  <span class="text-gray-400 text-xs">無</span>
+                </div>
+              </td>
+
+              <!-- td14: 物品影像 -->
+              <td class="px-3 py-1.5">
+                <div
+                  v-if="supplementCache[expense.id].item_image_url?.length"
+                  class="w-10 h-10 rounded overflow-hidden border border-purple-200"
+                >
+                  <img :src="supplementCache[expense.id].item_image_url[0]" alt="物品影像" class="w-full h-full object-cover" />
+                </div>
+                <div v-else class="w-10 h-10 bg-gray-200 rounded border border-gray-300 flex items-center justify-center">
+                  <span class="text-gray-400 text-xs">無</span>
+                </div>
+              </td>
+
+              <!-- td15: 項目說明 + 金額 -->
+              <td class="px-3 py-1.5 text-gray-600 max-w-xs">
+                <div class="line-clamp-2 text-xs leading-relaxed">
+                  {{ supplementCache[expense.id].item_description || '-' }}
+                </div>
+                <div v-if="supplementCache[expense.id].total_amount" class="text-xs text-gray-400 mt-0.5">
+                  {{ formatAmount(supplementCache[expense.id].total_amount) }}
+                </div>
+              </td>
+            </tr>
           </template>
 
           <!-- 空資料提示 -->
-          <tr v-if="store.paginatedExpenses.length === 0">
+          <tr v-if="visibleExpenses.length === 0">
             <td colspan="14" class="px-4 py-10 text-center text-gray-400">
               目前無符合條件的報帳紀錄
             </td>

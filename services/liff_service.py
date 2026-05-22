@@ -300,12 +300,14 @@ async def submit_session(
     db: Session,
     session_id: uuid.UUID,
     group_descriptions: dict[int, str],
+    waiting_return_ref: str | None = None,
 ) -> SubmitSessionResponse:
     """
     鎖定 session → 依 sequence_order 重跑 OCR（若 is_voucher 仍為 None）
     → multi_split_logic_v2 → create_batch_expense。
 
     group_descriptions: { group_index: description_text }
+    waiting_return_ref: 若使用者在 LIFF 勾選「待退貨物品照」，帶入原始憑證號碼
     """
     session = _get_session_or_404(db, session_id)
 
@@ -376,10 +378,22 @@ async def submit_session(
     # 兩階段切割
     groups_raw, orphan_paths = multi_split_logic_v2(entries, ocr_stubs)
 
+    # 待退貨補件模式：孤立圖片不自動接合到近期報帳，直接併入 groups 建立 RETURN_SUPPLEMENT
+    if orphan_paths and waiting_return_ref:
+        groups_raw.append((
+            orphan_paths,
+            [VoucherOCRResult(success=False, is_voucher=False)] * len(orphan_paths),
+        ))
+        orphan_paths = []
+        logger.info(
+            "liff_service.submit_session: waiting_return_ref=%s, redirect %d orphan image(s) into groups",
+            waiting_return_ref, len(groups_raw[-1][0]),
+        )
+
     batch_group_id = uuid.uuid4() if groups_raw else None
     created_expenses: list[CreatedExpenseItem] = []
 
-    # 處理孤立物品圖
+    # 處理孤立物品圖（waiting_return_ref 時已提前清空 orphan_paths，此區塊不執行）
     orphan_attached = False
     if orphan_paths:
         resolved = relation_service.attach_orphan_images_to_recent_expense(
@@ -420,6 +434,18 @@ async def submit_session(
                 trigger_by="liff",
                 group_id=batch_group_id,
             )
+            # LIFF Mode 2：使用者明確標記此批次為退貨物品照
+            if waiting_return_ref:
+                expense.relation_type = "RETURN_SUPPLEMENT"
+                expense.referenced_invoice_number = waiting_return_ref
+                # 將備註與待退貨憑證號碼寫入 item_description，解除配對後仍可追溯原始憑證來源
+                ref_note = f"待退貨補件，原始憑證：{waiting_return_ref}"
+                expense.item_description = f"{description} | {ref_note}" if description else ref_note
+                db.commit()
+                logger.info(
+                    "liff_service.submit_session: RETURN_SUPPLEMENT group=%d serial=%s invoice=%s",
+                    group_idx, expense.serial_number, waiting_return_ref,
+                )
             created_expenses.append(CreatedExpenseItem(
                 group_index=group_idx,
                 expense_id=expense.id,

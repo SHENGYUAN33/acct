@@ -55,11 +55,14 @@ def list_expenses(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=200),
     include_inactive: bool = Query(default=False, description="是否包含已作廢（REPLACED_VOID）記錄"),
+    q: str | None = Query(default=None, description="模糊搜尋：案件編號或上傳者姓名"),
+    referenced_invoice_number: str | None = Query(default=None, description="篩選指定原始憑證號碼的補件"),
     db: Session = Depends(get_db),
 ) -> dict:
     total, items = expense_service.list_expenses(
         db, status=status, date_from=date_from, date_to=date_to,
-        page=page, page_size=page_size, include_inactive=include_inactive,
+        page=page, page_size=page_size, include_inactive=include_inactive, q=q,
+        referenced_invoice_number=referenced_invoice_number,
     )
     return {
         "status": "success",
@@ -135,6 +138,79 @@ def create_expense(body: ExpenseCreate, db: Session = Depends(get_db)) -> dict:
     }
 
 
+# ── GET /expenses/waiting-returns（待退貨管理清單）────────────────
+# ⚠️ 必須在 /{expense_id} 之前定義，否則 "waiting-returns" 會被解析為 UUID
+@router.get("/expenses/waiting-returns", response_model=dict)
+def list_waiting_returns(
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    回傳所有待退貨相關案件：
+    - cases：每個 WAITING_RETURN 原始憑證 + 對應的 RETURN_SUPPLEMENT 補件（可能無）
+    - orphan_supplements：有 RETURN_SUPPLEMENT 但找不到對應 WAITING_RETURN 的孤立補件
+    - total：WAITING_RETURN 案件數（用於 badge）
+    """
+    # Step 1：取所有 WAITING_RETURN 原始憑證
+    invoices: list[Expense] = list(db.scalars(
+        select(Expense).where(
+            Expense.status == ExpenseStatus.WAITING_RETURN,
+            Expense.is_active == True,
+        ).order_by(Expense.created_at.desc())
+    ).all())
+
+    # Step 2：取所有 RETURN_SUPPLEMENT 補件（含 COMPLETED，供展開追蹤歷史用）
+    supplements: list[Expense] = list(db.scalars(
+        select(Expense).where(
+            Expense.relation_type == "RETURN_SUPPLEMENT",
+            Expense.is_active == True,
+        ).order_by(Expense.created_at.desc())
+    ).all())
+
+    # Step 3：以 invoice_number 建立 index，讓補件配對原始憑證
+    invoice_by_number: dict[str, Expense] = {
+        inv.invoice_number: inv
+        for inv in invoices
+        if inv.invoice_number
+    }
+    matched_invoice_ids: set[uuid.UUID] = set()
+
+    cases = []
+    orphan_supplements = []
+
+    for sup in supplements:
+        matched_invoice: Expense | None = None
+        if sup.referenced_invoice_number:
+            matched_invoice = invoice_by_number.get(sup.referenced_invoice_number)
+        if matched_invoice:
+            matched_invoice_ids.add(matched_invoice.id)
+            cases.append({
+                "invoice": ExpenseWithImages.model_validate(matched_invoice).model_dump(),
+                "supplement": ExpenseWithImages.model_validate(sup).model_dump(),
+            })
+        else:
+            # COMPLETED 補件已完成配對流程，不再顯示於孤立補件區
+            if sup.status != ExpenseStatus.COMPLETED:
+                orphan_supplements.append(ExpenseWithImages.model_validate(sup).model_dump())
+
+    # Step 4：WAITING_RETURN 原始憑證若尚無對應補件，單獨列出（supplement=null）
+    for inv in invoices:
+        if inv.id not in matched_invoice_ids:
+            cases.append({
+                "invoice": ExpenseWithImages.model_validate(inv).model_dump(),
+                "supplement": None,
+            })
+
+    return {
+        "status": "success",
+        "data": {
+            "cases": cases,
+            "orphan_supplements": orphan_supplements,
+            "total": len(invoices),  # badge 顯示 WAITING_RETURN 案件數
+        },
+        "message": "ok",
+    }
+
+
 # ── GET /expenses/{id}/related（查詢關聯報帳）────────────────────
 # ⚠️ 必須在 /{expense_id} 之前定義，否則 "related" 會被解析為 UUID
 @router.get("/expenses/{expense_id}/related", response_model=dict)
@@ -206,7 +282,7 @@ def update_expense(
     db: Session = Depends(get_db),
 ) -> dict:
     """Dashboard 審核表單儲存：部分更新 Expense 欄位（含可選的 status 變更）。"""
-    updates = body.model_dump(exclude_none=True)
+    updates = body.model_dump(exclude_unset=True)
     expense = expense_service.update_expense(db, expense_id, updates)
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")

@@ -17,6 +17,7 @@ from decimal import Decimal
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
+from core.config import settings
 from models.expense import Expense, ExpenseStatus
 from schemas.ocr import VoucherOCRResult
 
@@ -131,6 +132,27 @@ def _extract_void_reason(user_description: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 _INVOICE_REF_PATTERN = re.compile(r"\[([A-Z]{2}-\d{8})\]")
+
+# 待退貨偵測：匹配「待退貨 AB-12345678」或「待退貨 AB12345678」
+_RETURN_SUPPLEMENT_PATTERN = re.compile(r"待退貨\s*([A-Z]{2}-?\d{8})")
+
+
+def _detect_return_supplement_invoice(user_description: str | None) -> str | None:
+    """
+    偵測說明文字中的待退貨憑證號碼。
+    格式：「待退貨 AB-12345678」或「待退貨 AB12345678」
+    回傳正規化後的發票號碼（含連字號），或 None。
+    """
+    if not user_description:
+        return None
+    match = _RETURN_SUPPLEMENT_PATTERN.search(user_description)
+    if not match:
+        return None
+    raw = match.group(1)
+    # 正規化：無連字號者補上（AB12345678 → AB-12345678）
+    if "-" not in raw and len(raw) == 10:
+        return f"{raw[:2]}-{raw[2:]}"
+    return raw
 
 
 def _extract_relation(
@@ -319,6 +341,31 @@ def auto_link_records(
     任何例外只 log，不影響已提交的新報帳。
     """
     try:
+        # 待退貨偵測（enable_waiting_return_text_mode=True 時生效）
+        if settings.enable_waiting_return_text_mode:
+            rs_invoice = _detect_return_supplement_invoice(user_description)
+            if rs_invoice:
+                # 「待退貨 AB-12345678」→ 補件（物品照）
+                new_expense.relation_type = "RETURN_SUPPLEMENT"
+                new_expense.referenced_invoice_number = rs_invoice
+                db.commit()
+                logger.info(
+                    "auto_link_records RETURN_SUPPLEMENT: new=%s invoice=%s",
+                    new_expense.serial_number, rs_invoice,
+                )
+                db.refresh(new_expense)
+                return new_expense
+            elif detect_waiting_return(user_description):
+                # 「待退貨」無發票號碼 → 原始待退貨憑證
+                new_expense.status = ExpenseStatus.WAITING_RETURN
+                db.commit()
+                logger.info(
+                    "auto_link_records WAITING_RETURN: new=%s",
+                    new_expense.serial_number,
+                )
+                db.refresh(new_expense)
+                return new_expense
+
         relation = _extract_relation(ocr_results, user_description)
 
         if relation:
