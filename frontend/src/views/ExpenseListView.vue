@@ -4,7 +4,7 @@ import { useExpenseStore } from '../stores/expenseStore'
 import FilterPanel from '../components/FilterPanel.vue'
 import ExpenseTable from '../components/ExpenseTable.vue'
 import Pagination from '../components/Pagination.vue'
-import { Plus, Download, ChevronDown, Loader2, Zap, Settings, PackageX } from 'lucide-vue-next'
+import { Plus, Download, ChevronDown, Loader2, Zap, Settings, PackageX, TriangleAlert } from 'lucide-vue-next'
 import { processPendingNow, fetchWaitingReturns } from '../api/expenseApi'
 import SchedulerConfigModal from '../components/SchedulerConfigModal.vue'
 import WaitingReturnModal from '../components/WaitingReturnModal.vue'
@@ -13,6 +13,11 @@ const store = useExpenseStore()
 const isExporting = ref(false)
 const isProcessing = ref(false)
 const processResult = ref(null) // { type: 'success' | 'error', message: string }
+
+// Dashboard 功能按鈕開關（由根目錄 .env 的 VITE_ 變數控制，預設開啟）
+const showProcessPending = import.meta.env.VITE_ENABLE_PROCESS_PENDING !== 'false'
+const showSchedulerConfig = import.meta.env.VITE_ENABLE_SCHEDULER_CONFIG !== 'false'
+const showDuplicateDetection = import.meta.env.VITE_ENABLE_DUPLICATE_DETECTION !== 'false'
 const showSchedulerModal = ref(false)
 const showWaitingReturnModal = ref(false)
 const waitingReturnCount = ref(0)
@@ -99,6 +104,7 @@ async function handleProcessPending() {
       </button>
 
       <button
+        v-if="showProcessPending"
         @click="handleProcessPending"
         :disabled="isProcessing"
         class="flex items-center gap-1.5 px-4 py-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white rounded-full text-sm font-medium transition-colors"
@@ -109,6 +115,7 @@ async function handleProcessPending() {
       </button>
 
       <button
+        v-if="showSchedulerConfig"
         @click="showSchedulerModal = true"
         class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 hover:border-orange-400 hover:text-orange-500 text-gray-500 rounded-full text-sm transition-colors"
         title="排程批次設定"
@@ -128,6 +135,21 @@ async function handleProcessPending() {
           v-if="waitingReturnCount > 0"
           class="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center bg-purple-500 text-white text-[10px] font-bold rounded-full px-1"
         >{{ waitingReturnCount }}</span>
+      </button>
+
+      <button
+        v-if="showDuplicateDetection"
+        @click="store.toggleDuplicateFilter()"
+        :class="[
+          'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors',
+          store.hasDuplicateFilter
+            ? 'bg-red-500 text-white border border-red-500'
+            : 'border border-red-300 hover:bg-red-50 text-red-600'
+        ]"
+        title="篩選疑似重複憑證"
+      >
+        <TriangleAlert :size="14" />
+        疑似重複
       </button>
     </div>
 

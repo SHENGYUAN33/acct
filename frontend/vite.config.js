@@ -9,6 +9,8 @@ export default defineConfig({
     tailwindcss(),
     vue(),
   ],
+  // 讀取專案根目錄的 .env（與後端共用同一份設定檔）
+  envDir: '../',
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

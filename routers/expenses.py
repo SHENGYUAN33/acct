@@ -57,12 +57,14 @@ def list_expenses(
     include_inactive: bool = Query(default=False, description="是否包含已作廢（REPLACED_VOID）記錄"),
     q: str | None = Query(default=None, description="模糊搜尋：案件編號或上傳者姓名"),
     referenced_invoice_number: str | None = Query(default=None, description="篩選指定原始憑證號碼的補件"),
+    has_duplicate: bool | None = Query(default=None, description="True 時只回傳疑似重複憑證的 Expense"),
     db: Session = Depends(get_db),
 ) -> dict:
     total, items = expense_service.list_expenses(
         db, status=status, date_from=date_from, date_to=date_to,
         page=page, page_size=page_size, include_inactive=include_inactive, q=q,
         referenced_invoice_number=referenced_invoice_number,
+        has_duplicate=has_duplicate,
     )
     return {
         "status": "success",
@@ -300,6 +302,39 @@ def delete_expense(expense_id: uuid.UUID, db: Session = Depends(get_db)) -> None
     deleted = expense_service.delete_expense(db, expense_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Expense not found")
+
+
+# ── PATCH /expenses/{id}/resolve-duplicate（裁決重複憑證）────────
+class ResolveDuplicateRequest(BaseModel):
+    action: Literal["dismiss", "delete"]
+
+
+@router.patch("/expenses/{expense_id}/resolve-duplicate", response_model=dict)
+def resolve_duplicate(
+    expense_id: uuid.UUID,
+    body: ResolveDuplicateRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """處理疑似重複憑證：dismiss（確認合法，清除警示）或 delete（刪除此筆）。"""
+    from sqlalchemy import select as sa_select
+    from models.expense import Expense as ExpenseModel
+
+    expense = db.scalar(sa_select(ExpenseModel).where(ExpenseModel.id == expense_id))
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    if expense.possible_duplicate_of is None:
+        raise HTTPException(status_code=400, detail="此費用單無重複憑證標記")
+
+    if body.action == "dismiss":
+        expense.possible_duplicate_of = None
+        db.commit()
+        return {"status": "success", "data": None, "message": "已確認為合法單據，警示已清除"}
+
+    # action == "delete"
+    deleted = expense_service.delete_expense(db, expense_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    return {"status": "success", "data": None, "message": "重複費用單已刪除"}
 
 
 # ── PATCH /expenses/{id}/reject（退回單據 + LINE 推播）──────────

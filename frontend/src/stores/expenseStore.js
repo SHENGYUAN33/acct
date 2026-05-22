@@ -96,6 +96,15 @@ export const useExpenseStore = defineStore('expense', () => {
   const selectedExpense = ref(null)
   const isAuditModalOpen = ref(false)
 
+  // 重複憑證篩選
+  const hasDuplicateFilter = ref(false)
+
+  function toggleDuplicateFilter() {
+    hasDuplicateFilter.value = !hasDuplicateFilter.value
+    currentPage.value = 1
+    fetchExpenses()
+  }
+
   // ── Getters ──────────────────────────────────────────────────
   const filteredExpenses = computed(() => {
     return expenses.value.filter((e) => {
@@ -203,6 +212,7 @@ export const useExpenseStore = defineStore('expense', () => {
       const params = {
         page: currentPage.value,
         page_size: pageSize.value,
+        ...(hasDuplicateFilter.value ? { has_duplicate: true } : {}),
         ...extraParams,
       }
       const res = await apiFetchExpenses(params)
@@ -409,6 +419,7 @@ export const useExpenseStore = defineStore('expense', () => {
     stats,
     checkedIds,
     allChecked,
+    hasDuplicateFilter,
     setFilter,
     setPage,
     setPageSize,
@@ -427,5 +438,6 @@ export const useExpenseStore = defineStore('expense', () => {
     rejectExpense,
     reOcrExpense,
     reorderExpenses,
+    toggleDuplicateFilter,
   }
 })

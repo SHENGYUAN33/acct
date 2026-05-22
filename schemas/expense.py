@@ -57,6 +57,8 @@ class ExpenseRead(BaseModel):
     is_active: bool = True
     void_reason: str | None = None
     referenced_invoice_number: str | None = None
+    # 重複憑證偵測（指向同 user 相同 invoice_number 的先前單）
+    possible_duplicate_of: uuid.UUID | None = None
 
     model_config = {"from_attributes": True}
 

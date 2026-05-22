@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { useExpenseStore } from '../stores/expenseStore'
-import { getExpense, fetchExpenses } from '../api/expenseApi'
+import { getExpense, fetchExpenses, resolveDuplicate } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
 import { Pencil, Trash2, Plus, ChevronsUpDown, ChevronRight, Link2, GripVertical } from 'lucide-vue-next'
 import ConfirmModal from './ConfirmModal.vue'
@@ -109,6 +109,27 @@ async function confirmDelete() {
   try {
     await store.deleteExpense(expense.id)
     toast.success('已成功刪除該筆報帳！')
+  } catch {
+    toast.error('刪除失敗，請稍後再試')
+  }
+}
+
+// 重複憑證處理
+async function handleDuplicateDismiss(expense) {
+  try {
+    await resolveDuplicate(expense.id, 'dismiss')
+    toast.success('已確認為合法單據，警示已清除')
+    store.fetchExpenses()
+  } catch {
+    toast.error('操作失敗，請稍後再試')
+  }
+}
+
+async function handleDuplicateDelete(expense) {
+  try {
+    await resolveDuplicate(expense.id, 'delete')
+    toast.success('重複費用單已刪除')
+    store.fetchExpenses()
   } catch {
     toast.error('刪除失敗，請稍後再試')
   }
@@ -287,7 +308,7 @@ function onDragEnd() {
 
               <!-- 案件編號 -->
               <td class="px-3 py-2 text-gray-700 font-medium whitespace-nowrap font-mono text-xs">
-                <div class="flex items-center gap-1">
+                <div class="flex items-center gap-1 flex-wrap">
                   <span>{{ expense.serial_number || '#' + expense.serial }}</span>
                   <!-- Sprint 3：觸發來源 Badge -->
                   <span
@@ -295,6 +316,12 @@ function onDragEnd() {
                     class="text-[10px] px-1 py-0.5 rounded bg-yellow-100 text-yellow-700"
                     title="自動送出"
                   >⏱</span>
+                  <!-- 重複憑證警示 -->
+                  <span
+                    v-if="expense.possible_duplicate_of"
+                    class="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 border border-red-200 font-sans"
+                    title="此憑證疑似已上傳過，請由管理員裁決"
+                  >⚠ 疑似重複</span>
                 </div>
               </td>
 
@@ -340,6 +367,19 @@ function onDragEnd() {
                   >
                     <Plus :size="13" />
                   </button>
+                  <!-- 重複憑證裁決按鈕 -->
+                  <template v-if="expense.possible_duplicate_of">
+                    <button
+                      @click="handleDuplicateDismiss(expense)"
+                      class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-300 transition-colors"
+                      title="確認合法，清除重複警示"
+                    >合法</button>
+                    <button
+                      @click="handleDuplicateDelete(expense)"
+                      class="text-[10px] px-1.5 py-0.5 rounded bg-red-50 hover:bg-red-100 text-red-600 border border-red-300 transition-colors"
+                      title="刪除此筆重複費用單"
+                    >刪除</button>
+                  </template>
                 </div>
               </td>
 

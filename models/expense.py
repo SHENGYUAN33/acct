@@ -103,6 +103,11 @@ class Expense(Base):
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("expenses.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # 重複憑證偵測：指向同 user、相同 invoice_number 的先前 Expense（非 null 時 Dashboard 顯示警示）
+    possible_duplicate_of: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("expenses.id", ondelete="SET NULL"), nullable=True
+    )
+
     # 關聯類型：'VOID_REPLACE' | 'CREDIT_NOTE' | 'SUPPLEMENT'
     relation_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # 軟刪除：False 表示已作廢，Dashboard 金額加總時排除

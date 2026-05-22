@@ -184,12 +184,14 @@ def list_expenses(
     include_inactive: bool = False,
     q: str | None = None,
     referenced_invoice_number: str | None = None,
+    has_duplicate: bool | None = None,
 ) -> tuple[int, list[Expense]]:
     """Return (total_count, expenses) with optional filters and pagination.
 
     include_inactive=False（預設）：排除 is_active=False 的作廢記錄，避免重覆計算。
     q：模糊搜尋案件編號或上傳者姓名（ILIKE）。
     referenced_invoice_number：精確篩選補件所參考的原始憑證號碼。
+    has_duplicate=True：只回傳 possible_duplicate_of 非 null 的疑似重複記錄。
     """
     stmt = select(Expense).order_by(Expense.created_at.desc())
 
@@ -208,6 +210,8 @@ def list_expenses(
         )
     if referenced_invoice_number:
         stmt = stmt.where(Expense.referenced_invoice_number == referenced_invoice_number)
+    if has_duplicate is True:
+        stmt = stmt.where(Expense.possible_duplicate_of.isnot(None))
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     items = db.scalars(stmt.offset((page - 1) * page_size).limit(page_size)).all()
@@ -607,6 +611,29 @@ def _pick_primary_invoice_number(ocr_results: list[VoucherOCRResult]) -> str | N
     return None
 
 
+def _detect_duplicate_invoice(
+    db: Session,
+    user_id: uuid.UUID,
+    invoice_number: str,
+) -> uuid.UUID | None:
+    """偵測同一使用者是否已有相同 invoice_number 的有效報帳。
+
+    排除 REPLACED_VOID（已作廢）；找到則回傳最新那筆的 id，否則回傳 None。
+    """
+    existing = db.scalar(
+        select(Expense.id)
+        .where(
+            Expense.user_id == user_id,
+            Expense.invoice_number == invoice_number,
+            Expense.status != ExpenseStatus.REPLACED_VOID,
+            Expense.is_active == True,
+        )
+        .order_by(Expense.created_at.desc())
+        .limit(1)
+    )
+    return existing
+
+
 def create_batch_expense(
     db: Session,
     user_id: uuid.UUID,
@@ -654,6 +681,18 @@ def create_batch_expense(
                 primary_invoice, existing_waiting.serial_number,
             )
             return existing_waiting
+
+    # ── 0b. 重複憑證偵測（高精度：invoice_number 完全比對）────────────
+    # 若主憑證號碼已存在於同 user 的有效報帳，標記 possible_duplicate_of，
+    # 仍正常建立 Expense，由 Dashboard 管理員裁決。
+    duplicate_of_id: uuid.UUID | None = None
+    if primary_invoice and user_id:
+        duplicate_of_id = _detect_duplicate_invoice(db, user_id, primary_invoice)
+        if duplicate_of_id:
+            logger.info(
+                "create_batch_expense: 偵測到重複憑證 invoice=%s，將標記 possible_duplicate_of=%s",
+                primary_invoice, duplicate_of_id,
+            )
 
     # ── 1. 從主憑證提取主欄位 ──────────────────────────────────────
     primary_fields = _pick_primary_fields(ocr_results)
@@ -740,6 +779,7 @@ def create_batch_expense(
             status=status,
             trigger_by=trigger_by,
             group_id=group_id,
+            possible_duplicate_of=duplicate_of_id,
             submitter_name=primary_fields.get("submitter_name"),
             item_description=effective_item_description,
             expense_date=primary_fields.get("expense_date"),

@@ -156,3 +156,14 @@ export const moveExpenseImage = (expenseId, imageId, targetExpenseId) =>
   apiClient.post(`/api/v1/expenses/${expenseId}/images/${imageId}/move`, {
     target_expense_id: targetExpenseId,
   })
+
+/**
+ * PATCH /api/v1/expenses/{id}/resolve-duplicate
+ * 裁決疑似重複憑證
+ * @param {string} id - Expense UUID（疑似重複的那筆）
+ * @param {'dismiss'|'delete'} action
+ *   dismiss：確認合法，清除警示（possible_duplicate_of 設為 null）
+ *   delete：刪除此筆重複費用單
+ */
+export const resolveDuplicate = (id, action) =>
+  apiClient.patch(`/api/v1/expenses/${id}/resolve-duplicate`, { action })
