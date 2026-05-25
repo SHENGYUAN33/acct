@@ -215,7 +215,7 @@ function isDraggingFromThisColumn(expenseId) {
 
         <!-- 無批次資料 -->
         <div
-          v-else-if="batchExpenses.length <= 1"
+          v-else-if="batchExpenses.length === 0"
           class="flex flex-col items-center justify-center h-full text-gray-400 gap-3"
         >
           <ArrowRightLeft :size="40" class="opacity-25" />

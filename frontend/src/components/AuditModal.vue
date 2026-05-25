@@ -987,12 +987,6 @@ function formatDateTime(val) {
                               <div v-if="parseOcrFields(img.ocr_result).item_description">
                                 品項：<span class="font-medium text-gray-800">{{ parseOcrFields(img.ocr_result).item_description }}</span>
                               </div>
-                              <div v-if="parseOcrFields(img.ocr_result).overall_confidence !== null">
-                                OCR 信心：<span
-                                  :class="parseOcrFields(img.ocr_result).overall_confidence >= 80 ? 'text-green-600' : parseOcrFields(img.ocr_result).overall_confidence >= 60 ? 'text-yellow-600' : 'text-red-500'"
-                                  class="font-medium"
-                                >{{ parseOcrFields(img.ocr_result).overall_confidence }}%</span>
-                              </div>
                             </div>
                           </template>
                           <!-- 編輯按鈕 -->

@@ -65,6 +65,7 @@ async function loadData() {
     const res = await fetchWaitingReturns()
     cases.value = res.data?.data?.cases ?? []
     orphanSupplements.value = res.data?.data?.orphan_supplements ?? []
+    emit('count-changed')
   } catch {
     toast.error('待退貨資料載入失敗')
     cases.value = []

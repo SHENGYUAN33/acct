@@ -113,3 +113,9 @@ ocr/
 | `GET` | `/api/v1/expenses/{id}` | 單筆報帳詳情 |
 | `PUT` | `/api/v1/expenses/{id}/status` | 審核（APPROVED / REJECTED） |
 | `GET` | `/health` | 健康檢查 |
+
+
+uvicorn main:app --reload
+PS C:\Users\tkums\OneDrive\桌面\ocr\frontend> npm run dev
+
+ngrok http 8000

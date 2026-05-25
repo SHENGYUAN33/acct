@@ -680,10 +680,6 @@ function onDragEnd() {
               <!-- td10: 審核狀態 -->
               <td class="px-3 py-1.5 whitespace-nowrap">
                 <div class="flex items-center gap-1 flex-wrap">
-                  <span
-                    class="text-xs font-medium"
-                    :class="getStatusConfig(supplementCache[expense.id].status).textColor"
-                  >{{ getStatusConfig(supplementCache[expense.id].status).label }}</span>
                   <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-600 border border-purple-200">補件</span>
                 </div>
               </td>
