@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     # 啟用後，LIFF 確認頁顯示「此上傳為退貨物品照」toggle，提交時帶入 waiting_return_ref
     enable_waiting_return_liff_button: bool = False
 
+    # 功能開關：LIFF 送出切割模式
+    # "single" = 每次送出一律建 1 筆（單筆報帳模式）
+    # "batch"  = 依憑證斷點切割成多筆（批次報帳模式）
+    liff_submit_mode: str = "single"
+
     # 功能開關：自動切割（60 秒無操作自動送出）
     # ⚠️  僅適用於單 Worker 模式（uvicorn --workers 1），多 Worker 時必須設為 False
     enable_auto_split: bool = False

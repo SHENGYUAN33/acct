@@ -146,7 +146,7 @@ def push_reject_notification(
 
 
 _RICH_MENU_NAME = "AcctAssist Main Menu v5 (LIFF)"
-_LIFF_URL = "https://liff.line.me/2010115806-blToY7nZ"
+_LIFF_URL = "https://liff.line.me/2010115806-UP0jctF7"
 _RICH_MENU_IMAGE_PATH = Path(__file__).parent.parent / "static" / "mockup" / "sprint2" / "rich_menu.jpg"
 
 

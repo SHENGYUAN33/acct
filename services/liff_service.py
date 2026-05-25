@@ -375,8 +375,12 @@ async def submit_session(
             is_voucher=img.is_voucher if img.is_voucher is not None else False,
         ))
 
-    # 兩階段切割
-    groups_raw, orphan_paths = multi_split_logic_v2(entries, ocr_stubs)
+    # 切割模式：batch = 依憑證斷點切割；single = 全部視為一群組
+    if settings.liff_submit_mode == "batch":
+        groups_raw, orphan_paths = multi_split_logic_v2(entries, ocr_stubs)
+    else:
+        groups_raw = [([ e.path for e in entries ], ocr_stubs)]
+        orphan_paths = []
 
     # 待退貨補件模式：孤立圖片不自動接合到近期報帳，直接併入 groups 建立 RETURN_SUPPLEMENT
     if orphan_paths and waiting_return_ref:

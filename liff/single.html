@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>AcctAssist 報帳</title>
+<script src="https://unpkg.com/@line/liff@2.22.3/dist/liff.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f5f6fa;
+    color: #1a1a1a;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: #1a1a2e;
+    color: white;
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header h1 { font-size: 17px; font-weight: 700; }
+  .user-tag {
+    font-size: 11px;
+    color: rgba(255,255,255,0.7);
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── Step bar ── */
+  .step-bar {
+    display: flex;
+    align-items: center;
+    padding: 14px 20px;
+    background: white;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .step-item {
+    display: flex; align-items: center; gap: 6px;
+    flex: 1; font-size: 12px; color: #9ca3af;
+  }
+  .step-item.active { color: #3b82f6; }
+  .step-item.done   { color: #22c55e; }
+  .step-dot {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #e5e7eb;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; flex-shrink: 0;
+  }
+  .step-item.active .step-dot { background: #3b82f6; color: white; }
+  .step-item.done   .step-dot { background: #22c55e; color: white; }
+  .step-line { flex: 1; height: 2px; background: #e5e7eb; margin: 0 4px; }
+  .step-line.done { background: #22c55e; }
+
+  /* ── Container ── */
+  .container { max-width: 640px; margin: 0 auto; padding: 20px 16px 60px; }
+
+  /* ── Upload area ── */
+  .upload-area {
+    border: 2px dashed #d1d5db; border-radius: 14px;
+    padding: 36px 20px; text-align: center;
+    background: white; cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  .upload-area:hover { border-color: #3b82f6; background: #f0f7ff; }
+  .upload-icon { font-size: 44px; margin-bottom: 10px; }
+  .upload-area h3 { font-size: 16px; margin-bottom: 6px; }
+  .upload-area p  { font-size: 13px; color: #6b7280; }
+
+  .hint-box {
+    background: #fffbeb; border: 1px solid #fcd34d;
+    border-radius: 10px; padding: 11px 14px; margin-top: 14px;
+    font-size: 13px; color: #92400e; line-height: 1.5;
+  }
+  .error-box {
+    background: #fef2f2; border: 1px solid #fca5a5;
+    border-radius: 10px; padding: 11px 14px;
+    font-size: 13px; color: #b91c1c; line-height: 1.5;
+  }
+
+  /* ── Photo grid ── */
+  .section-title {
+    font-size: 14px; font-weight: 600; color: #374151;
+    margin-bottom: 10px; display: flex; align-items: center;
+    gap: 8px; flex-wrap: wrap;
+  }
+  .count-badge {
+    background: #3b82f6; color: white; font-size: 11px;
+    font-weight: 700; padding: 2px 9px; border-radius: 20px;
+  }
+  .drag-hint { font-size: 11px; color: #9ca3af; font-weight: 400; }
+
+  .photo-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  @media (min-width: 480px) {
+    .photo-grid { grid-template-columns: repeat(4, 1fr); }
+  }
+
+  .photo-item {
+    position: relative; aspect-ratio: 1;
+    border-radius: 10px; overflow: hidden;
+    user-select: none; touch-action: none;
+    -webkit-user-select: none; cursor: grab;
+  }
+  .photo-item:active { cursor: grabbing; }
+  .photo-item img {
+    width: 100%; height: 100%; object-fit: cover;
+    pointer-events: none; display: block;
+  }
+  .photo-seq {
+    position: absolute; top: 5px; left: 5px;
+    background: rgba(0,0,0,.65); color: white;
+    font-size: 11px; font-weight: 700;
+    min-width: 22px; height: 22px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0 5px;
+  }
+  .photo-remove {
+    position: absolute; top: 0; right: 0;
+    background: rgba(220,38,38,.85); color: white;
+    border: none; width: 32px; height: 32px;
+    border-radius: 0 10px 0 10px;
+    font-size: 18px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; padding-bottom: 2px;
+  }
+
+  /* Drag clone */
+  #drag-clone {
+    position: fixed; pointer-events: none; z-index: 9999;
+    border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,.4);
+    transform: scale(1.08); opacity: .92;
+  }
+  .photo-item.is-dragging { opacity: .25; }
+  .photo-item.drag-over   { outline: 3px solid #3b82f6; border-radius: 10px; }
+
+  .add-more-btn {
+    display: flex; align-items: center; justify-content: center;
+    gap: 6px; width: 100%; padding: 11px;
+    border: 2px dashed #d1d5db; border-radius: 8px;
+    background: none; color: #6b7280; font-size: 13px;
+    cursor: pointer; margin-top: 8px;
+    transition: border-color .2s, color .2s; font-family: inherit;
+  }
+  .add-more-btn:hover { border-color: #3b82f6; color: #3b82f6; }
+
+  /* ── Notes ── */
+  .note-section { margin-top: 16px; }
+  .note-label {
+    font-size: 14px; font-weight: 600; color: #374151;
+    margin-bottom: 8px; display: block;
+  }
+  .note-textarea {
+    width: 100%; border: 1px solid #d1d5db; border-radius: 10px;
+    padding: 10px 12px; font-size: 14px; font-family: inherit;
+    color: #374151; resize: none; outline: none;
+    transition: border-color .2s; background: white;
+  }
+  .note-textarea:focus { border-color: #3b82f6; }
+
+  /* ── Buttons ── */
+  .btn {
+    display: block; width: 100%; padding: 14px;
+    border: none; border-radius: 12px;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+    transition: opacity .2s, transform .1s; font-family: inherit;
+  }
+  .btn:active { transform: scale(.98); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn-primary { background: #3b82f6; color: white; }
+  .btn-primary:not(:disabled):hover { background: #2563eb; }
+  .btn-ghost { background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; }
+  .btn-ghost:hover { background: #e5e7eb; }
+
+  /* ── Processing ── */
+  .processing { text-align: center; padding: 60px 20px; }
+  .spinner {
+    width: 52px; height: 52px;
+    border: 4px solid #e5e7eb; border-top-color: #3b82f6;
+    border-radius: 50%; animation: spin .75s linear infinite;
+    margin: 0 auto 20px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .processing h3 { font-size: 17px; margin-bottom: 8px; }
+  .processing p  { color: #6b7280; font-size: 14px; }
+  .progress-bar-wrap {
+    width: 100%; background: #e5e7eb; border-radius: 99px;
+    height: 6px; margin-top: 20px; overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%; background: #3b82f6; border-radius: 99px;
+    width: 0%; transition: width .4s ease;
+  }
+  .upload-status-list {
+    margin-top: 18px; text-align: left;
+    background: white; border-radius: 10px; padding: 8px 14px;
+    max-height: 180px; overflow-y: auto; font-size: 13px;
+  }
+  .upload-status-item {
+    padding: 6px 0; border-bottom: 1px solid #f3f4f6;
+    display: flex; align-items: center; gap: 8px; color: #374151;
+  }
+  .upload-status-item:last-child { border-bottom: none; }
+  .ustat-icon { font-size: 14px; flex-shrink: 0; }
+
+  /* ── Success ── */
+  .success-screen { text-align: center; padding: 60px 20px; }
+  .success-icon { font-size: 56px; margin-bottom: 16px; }
+  .success-screen h2 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+  .success-screen p { color: #6b7280; font-size: 14px; margin-bottom: 32px; }
+
+  /* ── Utilities ── */
+  .hidden { display: none !important; }
+  .mt-16 { margin-top: 16px; }
+  .mt-20 { margin-top: 20px; }
+  .mt-24 { margin-top: 24px; }
+</style>
+</head>
+<body>
+
+<!-- 初始化 overlay -->
+<div id="init-overlay" style="position:fixed;inset:0;background:white;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:9998;">
+  <div class="spinner"></div>
+  <p style="color:#6b7280;font-size:14px">載入中...</p>
+</div>
+
+<!-- Header -->
+<div class="header">
+  <h1>📋 AcctAssist 報帳</h1>
+  <span class="user-tag" id="user-tag">載入中</span>
+</div>
+
+<!-- Step bar（2 步驟） -->
+<div class="step-bar">
+  <div class="step-item active" id="si-1"><div class="step-dot">1</div><span>上傳報帳</span></div>
+  <div class="step-line" id="sl-1"></div>
+  <div class="step-item" id="si-2"><div class="step-dot">2</div><span>完成</span></div>
+</div>
+
+<div class="container">
+
+  <!-- STEP 1：選照片 + 備注 + 送出 -->
+  <div id="step-1">
+    <div class="upload-area" id="upload-trigger">
+      <div class="upload-icon">🖼️</div>
+      <h3>點擊選取照片</h3>
+      <p>支援一次選取多張</p>
+      <input type="file" id="file-input" multiple accept="image/*" style="display:none">
+    </div>
+
+    <div class="hint-box">
+      💡 每次報一筆費用，請選 <strong>最多 1 張憑證照</strong>（發票／收據），再依序選取對應的物品照（選填）。長按縮圖可拖曳調整順序。
+    </div>
+    <div id="step1-error" class="error-box hidden" style="margin-top:14px;"></div>
+
+    <div id="photo-grid-section" class="hidden mt-20">
+      <div class="section-title">
+        已選照片
+        <span class="count-badge" id="photo-count">0</span>
+        <span class="drag-hint">✦ 長按縮圖可拖曳調整順序</span>
+      </div>
+      <div class="photo-grid" id="photo-grid"></div>
+      <button class="add-more-btn" id="add-more-btn">＋ 新增更多照片</button>
+    </div>
+
+    <!-- 備注（常駐顯示） -->
+    <div class="note-section">
+      <label class="note-label" for="note-input">備注</label>
+      <textarea class="note-textarea" id="note-input" rows="3" placeholder="輸入備注"></textarea>
+    </div>
+
+    <!-- 待退貨標記（enable_waiting_return_liff_button=true 時顯示） -->
+    <div id="waiting-return-section" style="display:none; margin-top:16px; background:#faf5ff; border:1px solid #d8b4fe; border-radius:12px; padding:16px;">
+      <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:14px; font-weight:600; color:#7e22ce;">
+        <input type="checkbox" id="is-waiting-return" style="width:18px; height:18px; accent-color:#7c3aed;" />
+        此上傳為退貨物品照
+      </label>
+      <div id="waiting-return-input-wrap" style="display:none; margin-top:12px;">
+        <label style="font-size:13px; color:#6b7280; display:block; margin-bottom:6px;">原始憑證號碼（格式：AB-12345678）</label>
+        <input
+          type="text"
+          id="waiting-return-invoice"
+          placeholder="AB-12345678"
+          maxlength="11"
+          style="width:100%; box-sizing:border-box; border:1px solid #c4b5fd; border-radius:8px; padding:10px 12px; font-size:14px; font-family:monospace; outline:none;"
+        />
+        <p style="font-size:11px; color:#9ca3af; margin-top:6px;">輸入實體憑證上的號碼，方便審核人員配對退貨物品照</p>
+      </div>
+    </div>
+
+    <div class="mt-24">
+      <button class="btn btn-primary" id="btn-upload" disabled>送出上傳</button>
+    </div>
+  </div>
+
+  <!-- STEP 2：上傳中 / 成功 / 憑證數量錯誤 -->
+  <div id="step-2" class="hidden">
+
+    <!-- 上傳進度 -->
+    <div id="step-2-loading">
+      <div class="processing">
+        <div class="spinner"></div>
+        <h3 id="step2-title">上傳中</h3>
+        <p id="processing-msg"></p>
+        <div class="progress-bar-wrap mt-20">
+          <div class="progress-bar" id="progress-bar"></div>
+        </div>
+        <div class="upload-status-list" id="upload-status-list"></div>
+      </div>
+
+      <!-- 憑證數量超過 1 張時顯示 -->
+      <div id="step-2-error" class="hidden" style="padding: 0 4px 20px;">
+        <div class="error-box">
+          ⚠️ 偵測到 <strong id="voucher-error-count">0</strong> 張憑證，每次只能上傳一筆費用（最多 1 張憑證）。請重新選擇照片，每次只保留 1 張憑證。
+        </div>
+        <div class="mt-16">
+          <button class="btn btn-ghost" onclick="resetAll()">重新選擇照片</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 成功畫面 -->
+    <div id="step-2-success" class="hidden">
+      <div class="success-screen">
+        <div class="success-icon">🎉</div>
+        <h2>上傳完成！</h2>
+        <p>費用已送出，等待審核</p>
+        <button class="btn btn-ghost" onclick="resetAll()">繼續下一筆報帳</button>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+// LINE 瀏覽器 bfcache 防護：若頁面從記憶體快取恢復，強制重新向 server 取新版 HTML
+window.addEventListener('pageshow', function (ev) {
+  if (ev.persisted) { window.location.reload() }
+})
+
+// ════════════════════════════════
+//  設定（修改此區塊）
+// ════════════════════════════════
+const LIFF_ID  = '2010115806-UP0jctF7'
+const API_BASE = '{{LIFF_API_BASE}}'
+const ENABLE_WAITING_RETURN_LIFF_BUTTON = '{{ENABLE_WAITING_RETURN_LIFF_BUTTON}}'
+
+// ════════════════════════════════
+//  狀態
+// ════════════════════════════════
+let lineUserId  = ''
+let sessionId   = ''
+let photos      = []
+let isUploading = false
+
+// ════════════════════════════════
+//  DOM
+// ════════════════════════════════
+const fileInput        = document.getElementById('file-input')
+const uploadTrigger    = document.getElementById('upload-trigger')
+const addMoreBtn       = document.getElementById('add-more-btn')
+const photoGrid        = document.getElementById('photo-grid')
+const photoGridSection = document.getElementById('photo-grid-section')
+const photoCountEl     = document.getElementById('photo-count')
+const btnUpload        = document.getElementById('btn-upload')
+const initOverlay      = document.getElementById('init-overlay')
+const step1Error       = document.getElementById('step1-error')
+
+// ════════════════════════════════
+//  LIFF 初始化
+// ════════════════════════════════
+const DEV_MODE = (typeof liff === 'undefined') || !LIFF_ID || location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+
+async function initLiff() {
+  try {
+    if (!DEV_MODE) {
+      await liff.init({ liffId: LIFF_ID })
+      if (!liff.isLoggedIn()) { liff.login(); return }
+      const profile = await liff.getProfile()
+      lineUserId = profile.userId
+      document.getElementById('user-tag').textContent = profile.displayName
+    } else {
+      const params = new URLSearchParams(location.search)
+      lineUserId = params.get('uid') || 'dev_user_' + Date.now()
+      document.getElementById('user-tag').textContent = '開發模式'
+    }
+
+    const res = await apiPost('/liff/sessions', {
+      line_user_id: lineUserId,
+      id_token: DEV_MODE ? 'dev' : (liff.getIDToken() || 'n/a')
+    })
+    sessionId = res.session_id
+
+    initOverlay.classList.add('hidden')
+    setupEventListeners()
+  } catch (err) {
+    console.error('[LIFF] init error:', err)
+    document.querySelector('#init-overlay p').textContent = '初始化失敗：' + (err.message || err)
+  }
+}
+
+// ════════════════════════════════
+//  API helpers
+// ════════════════════════════════
+async function apiPost(path, body) {
+  const res = await fetch(API_BASE + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Line-User-Id': lineUserId },
+    body: JSON.stringify(body)
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+// ════════════════════════════════
+//  Event listeners
+// ════════════════════════════════
+function setupEventListeners() {
+  uploadTrigger.addEventListener('click', () => fileInput.click())
+  addMoreBtn.addEventListener('click',    () => fileInput.click())
+  fileInput.addEventListener('change', handleFileSelect)
+  btnUpload.addEventListener('click',  startUpload)
+  initWaitingReturnSection()
+}
+
+// ════════════════════════════════
+//  Step 1 — File Select
+// ════════════════════════════════
+function handleFileSelect(e) {
+  const files = Array.from(e.target.files)
+  if (!files.length) return
+
+  const incoming = files.map(file => ({
+    localId:    crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+    file,
+    preview:    URL.createObjectURL(file),
+    imageId:    null,
+    isVoucher:  null,
+    uploaded:   false,
+    error:      false,
+  }))
+  photos = [...photos, ...incoming]
+  fileInput.value = ''
+  step1Error.classList.add('hidden')
+  renderPhotoGrid()
+}
+
+function renderPhotoGrid() {
+  const hasPhotos = photos.length > 0
+  photoGridSection.classList.toggle('hidden', !hasPhotos)
+  btnUpload.disabled = !hasPhotos
+  if (!hasPhotos) return
+
+  photoCountEl.textContent = photos.length
+  photoGrid.innerHTML = ''
+
+  photos.forEach((photo, idx) => {
+    const el = document.createElement('div')
+    el.className   = 'photo-item'
+    el.dataset.idx = idx
+
+    el.innerHTML = `
+      <img src="${photo.preview}" alt="">
+      <div class="photo-seq">${idx + 1}</div>
+      <button class="photo-remove" data-idx="${idx}">×</button>
+    `
+
+    el.addEventListener('pointerdown',   ev => onPointerDown(ev, idx))
+    el.addEventListener('pointermove',   onPointerMove)
+    el.addEventListener('pointerup',     onPointerUp)
+    el.addEventListener('pointercancel', onPointerUp)
+
+    el.querySelector('.photo-remove').addEventListener('click', ev => {
+      ev.stopPropagation()
+      photos.splice(+ev.currentTarget.dataset.idx, 1)
+      renderPhotoGrid()
+    })
+
+    photoGrid.appendChild(el)
+  })
+}
+
+// ════════════════════════════════
+//  Drag & Drop (Pointer Events)
+// ════════════════════════════════
+let pDrag = null
+const DRAG_THRESHOLD = 8
+
+function onPointerDown(e, idx) {
+  if (e.target.closest('.photo-remove')) return
+  e.preventDefault()
+  const el   = e.currentTarget
+  const rect = el.getBoundingClientRect()
+  pDrag = {
+    sourceIdx: idx, targetIdx: idx, el,
+    startX: e.clientX, startY: e.clientY,
+    offsetX: e.clientX - rect.left, offsetY: e.clientY - rect.top,
+    clone: null, moved: false
+  }
+  el.setPointerCapture(e.pointerId)
+}
+
+function onPointerMove(e) {
+  if (!pDrag) return
+  const dx = e.clientX - pDrag.startX, dy = e.clientY - pDrag.startY
+  if (!pDrag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+  e.preventDefault()
+  if (!pDrag.moved) {
+    pDrag.moved = true
+    const rect  = pDrag.el.getBoundingClientRect()
+    const clone = pDrag.el.cloneNode(true)
+    clone.id = 'drag-clone'
+    clone.style.cssText = `width:${rect.width}px;height:${rect.height}px;left:${rect.left}px;top:${rect.top}px`
+    document.body.appendChild(clone)
+    pDrag.clone = clone
+    pDrag.el.classList.add('is-dragging')
+  }
+  pDrag.clone.style.left = (e.clientX - pDrag.offsetX) + 'px'
+  pDrag.clone.style.top  = (e.clientY - pDrag.offsetY) + 'px'
+
+  let bestDist = Infinity, bestIdx = pDrag.sourceIdx
+  document.querySelectorAll('.photo-item').forEach(item => {
+    item.classList.remove('drag-over')
+    const r  = item.getBoundingClientRect()
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2
+    const d  = Math.hypot(e.clientX - cx, e.clientY - cy)
+    if (d < bestDist) { bestDist = d; bestIdx = +item.dataset.idx }
+  })
+  pDrag.targetIdx = bestIdx
+  if (bestIdx !== pDrag.sourceIdx) {
+    const t = document.querySelector(`.photo-item[data-idx="${bestIdx}"]`)
+    if (t) t.classList.add('drag-over')
+  }
+}
+
+function onPointerUp() {
+  if (!pDrag) return
+  if (pDrag.clone) pDrag.clone.remove()
+  pDrag.el.classList.remove('is-dragging')
+  document.querySelectorAll('.photo-item').forEach(i => i.classList.remove('drag-over', 'is-dragging'))
+  if (pDrag.moved && pDrag.sourceIdx !== pDrag.targetIdx) {
+    const [moved] = photos.splice(pDrag.sourceIdx, 1)
+    photos.splice(pDrag.targetIdx, 0, moved)
+    renderPhotoGrid()
+  }
+  pDrag = null
+}
+
+// ════════════════════════════════
+//  Step 2 — Upload & Submit
+// ════════════════════════════════
+async function startUpload() {
+  if (!photos.length || isUploading) return
+  isUploading = true
+  btnUpload.disabled = true
+
+  // 顯示 Step 2 loading
+  document.getElementById('step-2-loading').classList.remove('hidden')
+  document.getElementById('step-2-success').classList.add('hidden')
+  document.getElementById('step-2-error').classList.add('hidden')
+  showStep(2)
+
+  const bar        = document.getElementById('progress-bar')
+  const msgEl      = document.getElementById('processing-msg')
+  const statusList = document.getElementById('upload-status-list')
+  statusList.innerHTML = ''
+  bar.style.width  = '0%'
+
+  photos.forEach((p, i) => {
+    const item = document.createElement('div')
+    item.className = 'upload-status-item'
+    item.id = `us-${p.localId}`
+    item.innerHTML = `<span class="ustat-icon">⏳</span> 第 ${i + 1} 張`
+    statusList.appendChild(item)
+  })
+
+  // 平行上傳（sequence_order = 陣列索引）
+  let done = 0
+  const uploadTasks = photos.map((photo, idx) => {
+    const fd = new FormData()
+    fd.append('file', photo.file)
+    fd.append('sequence_order', idx)
+
+    return fetch(`${API_BASE}/liff/sessions/${sessionId}/images`, {
+      method: 'POST',
+      headers: { 'X-Line-User-Id': lineUserId },
+      body: fd
+    })
+    .then(res => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      return res.json()
+    })
+    .then(data => {
+      photo.imageId   = data.image.image_id
+      photo.isVoucher = data.is_voucher
+      photo.uploaded  = true
+      const label = photo.isVoucher === true  ? '憑證 🟦'
+                  : photo.isVoucher === false ? '物品照'
+                  : '未辨識'
+      const el = document.getElementById(`us-${photo.localId}`)
+      if (el) el.innerHTML = `<span class="ustat-icon">✅</span> 第 ${idx + 1} 張 — ${label}`
+    })
+    .catch(err => {
+      photo.error = true
+      const el = document.getElementById(`us-${photo.localId}`)
+      if (el) el.innerHTML = `<span class="ustat-icon">❌</span> 第 ${idx + 1} 張 — 失敗`
+      console.error(`upload error photo ${idx}:`, err)
+    })
+    .finally(() => {
+      done++
+      bar.style.width = Math.round(done / photos.length * 80) + '%'
+      msgEl.textContent = `已完成 ${done} / ${photos.length} 張`
+    })
+  })
+
+  await Promise.all(uploadTasks)
+
+  // OCR 完成後驗證憑證數量：0 或 1 張才允許送出
+  const voucherCount = photos.filter(p => p.isVoucher === true).length
+  if (voucherCount > 1) {
+    document.getElementById('voucher-error-count').textContent = voucherCount
+    document.getElementById('step-2-error').classList.remove('hidden')
+    isUploading = false
+    return
+  }
+
+  // 送出
+  bar.style.width = '90%'
+  msgEl.textContent = '送出中...'
+
+  const noteText        = document.getElementById('note-input').value.trim()
+  const isWaitingReturn = document.getElementById('is-waiting-return')?.checked ?? false
+  const wrInvoiceValue  = (document.getElementById('waiting-return-invoice')?.value ?? '').trim()
+  const waitingReturnRef = (isWaitingReturn && wrInvoiceValue) ? wrInvoiceValue : null
+
+  try {
+    await apiPost(`/liff/sessions/${sessionId}/submit`, {
+      group_descriptions: [{ group_index: 0, description: noteText }],
+      ...(waitingReturnRef ? { waiting_return_ref: waitingReturnRef } : {})
+    })
+    bar.style.width = '100%'
+    setTimeout(() => {
+      document.getElementById('step-2-loading').classList.add('hidden')
+      document.getElementById('step-2-success').classList.remove('hidden')
+      updateStepBar(2)
+    }, 300)
+  } catch (err) {
+    msgEl.innerHTML = `<span style="color:#ef4444;font-size:13px">送出失敗：${err.message}</span>`
+    isUploading = false
+    btnUpload.disabled = false
+  }
+}
+
+// ════════════════════════════════
+//  Navigation
+// ════════════════════════════════
+function showStep(n) {
+  [1, 2].forEach(i => {
+    document.getElementById(`step-${i}`).classList.toggle('hidden', i !== n)
+  })
+  updateStepBar(n)
+  window.scrollTo(0, 0)
+}
+
+function updateStepBar(current) {
+  [1, 2].forEach(i => {
+    const si = document.getElementById(`si-${i}`)
+    si.classList.remove('active', 'done')
+    if (i < current)        si.classList.add('done')
+    else if (i === current) si.classList.add('active')
+  })
+  document.getElementById('sl-1').classList.toggle('done', current > 1)
+}
+
+async function resetAll() {
+  photos      = []
+  isUploading = false
+  pDrag       = null
+  document.getElementById('upload-status-list').innerHTML = ''
+  document.getElementById('progress-bar').style.width = '0%'
+  document.getElementById('note-input').value = ''
+  renderPhotoGrid()
+  btnUpload.disabled = true
+
+  const wrCheckbox = document.getElementById('is-waiting-return')
+  if (wrCheckbox) wrCheckbox.checked = false
+  const wrInvoice = document.getElementById('waiting-return-invoice')
+  if (wrInvoice) wrInvoice.value = ''
+  const wrInputWrap = document.getElementById('waiting-return-input-wrap')
+  if (wrInputWrap) wrInputWrap.style.display = 'none'
+
+  // 重新建立 session
+  try {
+    const res = await apiPost('/liff/sessions', {
+      line_user_id: lineUserId,
+      id_token: DEV_MODE ? 'dev' : (liff.getIDToken() || 'n/a')
+    })
+    sessionId = res.session_id
+  } catch (err) {
+    console.error('reset session failed:', err)
+  }
+
+  showStep(1)
+}
+
+// ════════════════════════════════
+//  待退貨功能
+// ════════════════════════════════
+let _wrListenerAdded = false
+
+function initWaitingReturnSection() {
+  if (ENABLE_WAITING_RETURN_LIFF_BUTTON !== true && ENABLE_WAITING_RETURN_LIFF_BUTTON !== 'true') return
+  const section   = document.getElementById('waiting-return-section')
+  const checkbox  = document.getElementById('is-waiting-return')
+  const inputWrap = document.getElementById('waiting-return-input-wrap')
+
+  if (section) section.style.display = 'block'
+
+  if (!_wrListenerAdded && checkbox && inputWrap) {
+    checkbox.addEventListener('change', () => {
+      inputWrap.style.display = checkbox.checked ? 'block' : 'none'
+    })
+    _wrListenerAdded = true
+  }
+}
+
+// ════════════════════════════════
+//  Bootstrap
+// ════════════════════════════════
+initLiff()
+</script>
+</body>
+</html>

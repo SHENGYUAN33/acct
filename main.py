@@ -51,34 +51,51 @@ app.include_router(liff.router)
 _BASE_DIR = _os.path.dirname(_os.path.abspath(__file__))
 app.mount("/uploads", StaticFiles(directory=_os.path.join(_BASE_DIR, "uploads")), name="uploads")
 
-_liff_index = _os.path.join(_BASE_DIR, "liff", "index.html")
+_liff_index  = _os.path.join(_BASE_DIR, "liff", "index.html")
+_liff_single = _os.path.join(_BASE_DIR, "liff", "single.html")
 
 
-@app.get("/liff-app", include_in_schema=False)
-@app.get("/liff-app/", include_in_schema=False)
-async def serve_liff_root(request: Request) -> Response:
-    """LIFF 前端入口。由 server 注入 API_BASE 並加 no-store 防止 LINE WebKit 快取舊版。"""
-    # 使用 x-forwarded 標頭支援 ngrok / reverse proxy；fallback 取 Host header
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "localhost:8000")
-    proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
-    api_base = f"{proto}://{host}"
-
-    with open(_liff_index, "r", encoding="utf-8") as f:
+def _inject_liff_vars(html_path: str, api_base: str) -> str:
+    with open(html_path, "r", encoding="utf-8") as f:
         content = f.read()
     content = content.replace("'{{LIFF_API_BASE}}'", f"'{api_base}'")
     content = content.replace(
         "'{{ENABLE_WAITING_RETURN_LIFF_BUTTON}}'",
         "true" if settings.enable_waiting_return_liff_button else "false",
     )
+    return content
 
+
+_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+
+@app.get("/liff-app", include_in_schema=False)
+@app.get("/liff-app/", include_in_schema=False)
+async def serve_liff_root(request: Request) -> Response:
+    """LIFF 批次報帳前端（多憑證模式）。"""
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "localhost:8000")
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
     return Response(
-        content=content,
+        content=_inject_liff_vars(_liff_index, f"{proto}://{host}"),
         media_type="text/html; charset=utf-8",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
+        headers=_NO_CACHE_HEADERS,
+    )
+
+
+@app.get("/liff-single", include_in_schema=False)
+@app.get("/liff-single/", include_in_schema=False)
+async def serve_liff_single(request: Request) -> Response:
+    """LIFF 單筆報帳前端（每次 1 筆，0–1 張憑證）。"""
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "localhost:8000")
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
+    return Response(
+        content=_inject_liff_vars(_liff_single, f"{proto}://{host}"),
+        media_type="text/html; charset=utf-8",
+        headers=_NO_CACHE_HEADERS,
     )
 
 
