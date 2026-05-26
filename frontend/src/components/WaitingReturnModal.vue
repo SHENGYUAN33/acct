@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { X, Loader2, PackageX, CheckCircle2, ChevronRight, ChevronDown, Search, Link2, Unlink2, Trash2 } from 'lucide-vue-next'
-import { fetchWaitingReturns, fetchExpenses, updateExpense, deleteExpense } from '../api/expenseApi'
+import { fetchWaitingReturns, fetchExpenses, updateExpense, deleteExpense, pairExpense } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
 
 const emit = defineEmits(['close', 'count-changed'])
@@ -30,6 +30,12 @@ const isLinking = ref(false)
 // ── 動作按鈕 ───────────────────────────────────────────────────────
 const completingId = ref(null)
 const unlinkingId = ref(null)
+
+// ── 左欄：手動加入原始交易 ─────────────────────────────────────────
+const leftSearchQuery = ref('')
+const isLeftSearching = ref(false)
+const leftSearchResults = ref([])
+const showLeftSearch = ref(false)
 
 // ── 燈箱 ───────────────────────────────────────────────────────────
 const lightboxUrl = ref(null)
@@ -89,7 +95,7 @@ async function searchSupplements() {
   try {
     const res = await fetchExpenses({ q, page_size: 30 })
     searchResults.value = (res.data?.data?.items ?? [])
-      .filter(e => e.relation_type === 'RETURN_SUPPLEMENT')
+      .filter(e => ['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE'].includes(e.relation_type))
   } catch {
     toast.error('搜尋失敗')
     searchResults.value = []
@@ -148,16 +154,13 @@ function onDrop(event, invoice) {
   dragOverInvoiceId.value = null
 }
 
-// ── 確認配對（只改 referenced_invoice_number，不搬移圖片）──────────
+// ── 確認配對（pair endpoint 設定 parent_id 與 referenced_invoice_number）──
 async function confirmLink() {
-  const { supplementId, invoiceNumber } = pendingLink.value
+  const { supplementId, invoiceId } = pendingLink.value
   pendingLink.value = null
   isLinking.value = true
   try {
-    await updateExpense(supplementId, {
-      referenced_invoice_number: invoiceNumber,
-      relation_type: 'RETURN_SUPPLEMENT',
-    })
+    await pairExpense(supplementId, invoiceId)
     toast.success('配對成功')
     await loadData()
     emit('count-changed')
@@ -166,6 +169,54 @@ async function confirmLink() {
   } finally {
     isLinking.value = false
   }
+}
+
+// ── 一鍵確認建議配對 ────────────────────────────────────────────────
+async function confirmSuggestedMatch(sup) {
+  if (!sup.suggested_match) return
+  isLinking.value = true
+  try {
+    await pairExpense(sup.id, sup.suggested_match.expense_id)
+    toast.success('建議配對已確認')
+    await loadData()
+    emit('count-changed')
+  } catch {
+    toast.error('配對失敗，請稍後再試')
+  } finally {
+    isLinking.value = false
+  }
+}
+
+// ── 情境類型標籤 ────────────────────────────────────────────────────
+function relationTypeLabel(type) {
+  if (type === 'VOID_REPLACE') return '換新發票'
+  if (type === 'CREDIT_NOTE') return '折讓單'
+  if (type === 'RETURN_SUPPLEMENT') return '換貨收據'
+  return ''
+}
+
+// ── 左欄：搜尋原始交易 ─────────────────────────────────────────────
+async function searchLeftPanel() {
+  const q = leftSearchQuery.value.trim()
+  if (!q) { leftSearchResults.value = []; return }
+  isLeftSearching.value = true
+  try {
+    const res = await fetchExpenses({ q, page_size: 20 })
+    const existingIds = new Set(cases.value.map(c => c.invoice.id))
+    leftSearchResults.value = (res.data?.data?.items ?? []).filter(e => !existingIds.has(e.id))
+  } catch {
+    toast.error('搜尋失敗')
+    leftSearchResults.value = []
+  } finally {
+    isLeftSearching.value = false
+  }
+}
+
+function addToLeftPanel(expense) {
+  cases.value = [{ invoice: expense, supplement: null }, ...cases.value]
+  leftSearchQuery.value = ''
+  leftSearchResults.value = []
+  showLeftSearch.value = false
 }
 
 // ── 確認配對完成：補件 → COMPLETED，憑證 → PENDING ────────────────
@@ -213,7 +264,7 @@ async function unlinkSupplement(supplement) {
   try {
     await updateExpense(supplement.id, {
       referenced_invoice_number: null,
-      // relation_type 保留 "RETURN_SUPPLEMENT"，解除後仍顯示在右欄孤立補件區
+      parent_id: null,
     })
     toast.success(`補件 ${supplement.serial_number} 已解除配對`)
     await loadData()
@@ -260,7 +311,51 @@ async function unlinkSupplement(supplement) {
       <div v-else class="flex-1 flex min-h-0">
 
         <!-- ── 左欄：待退貨憑證清單 ── -->
-        <div class="w-[58%] border-r border-gray-100 overflow-y-auto">
+        <div class="w-[58%] border-r border-gray-100 flex flex-col min-h-0">
+
+          <!-- 手動加入原始交易 -->
+          <div class="shrink-0 px-3 pt-2 pb-1.5 border-b border-gray-100">
+            <button
+              @click="showLeftSearch = !showLeftSearch"
+              class="text-[11px] text-purple-500 hover:text-purple-700 flex items-center gap-1"
+            >
+              <span>{{ showLeftSearch ? '▲' : '▼' }}</span>
+              手動加入原始交易至左側
+            </button>
+            <div v-if="showLeftSearch" class="mt-1.5 space-y-1">
+              <div class="flex gap-1">
+                <input
+                  v-model="leftSearchQuery"
+                  @keyup.enter="searchLeftPanel"
+                  placeholder="EXP編號 / 發票號碼 / 上傳者..."
+                  class="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400"
+                />
+                <button
+                  @click="searchLeftPanel"
+                  :disabled="isLeftSearching"
+                  class="flex items-center gap-1 px-2.5 py-1.5 bg-purple-500 hover:bg-purple-600 text-white text-xs rounded-lg disabled:opacity-50 transition-colors"
+                >
+                  <Loader2 v-if="isLeftSearching" :size="11" class="animate-spin" />
+                  <Search v-else :size="11" />
+                </button>
+              </div>
+              <div v-if="leftSearchResults.length" class="bg-white border border-gray-200 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+                <div
+                  v-for="exp in leftSearchResults"
+                  :key="exp.id"
+                  @click="addToLeftPanel(exp)"
+                  class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-purple-50 border-b border-gray-100 last:border-0"
+                >
+                  <span class="font-mono text-[11px] text-gray-800">{{ exp.serial_number }}</span>
+                  <span v-if="exp.invoice_number" class="text-[10px] font-mono text-gray-400">{{ exp.invoice_number }}</span>
+                  <span class="text-[10px] text-gray-500 truncate">{{ exp.uploader_name }}</span>
+                  <span class="ml-auto text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded">加入</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex-1 overflow-y-auto">
           <div class="divide-y divide-gray-100">
             <div
               v-for="(item, idx) in cases"
@@ -401,6 +496,7 @@ async function unlinkSupplement(supplement) {
               </div>
             </div>
           </div>
+          </div><!-- /flex-1 overflow-y-auto -->
         </div>
 
         <!-- ── 右欄：補件物品照池 ── -->
@@ -408,7 +504,7 @@ async function unlinkSupplement(supplement) {
 
           <!-- 搜尋欄 -->
           <div class="shrink-0 px-4 pt-3 pb-2 border-b border-gray-100 space-y-2">
-            <p class="text-[11px] font-medium text-gray-500">補件物品照（拖曳至左側憑證以配對）</p>
+            <p class="text-[11px] font-medium text-gray-500">待配對補件（拖曳至左側憑證以配對）</p>
             <div class="flex gap-1.5">
               <input
                 v-model="searchQuery"
@@ -463,6 +559,15 @@ async function unlinkSupplement(supplement) {
                 <span class="w-1.5 h-1.5 rounded-full shrink-0"
                   :class="STATUS_DOT[sup.status] ?? 'bg-gray-300'" />
                 <span class="font-mono text-[11px] font-semibold text-gray-700 truncate">{{ sup.serial_number }}</span>
+                <!-- 情境類型 badge -->
+                <span v-if="relationTypeLabel(sup.relation_type)"
+                  class="text-[9px] px-1 py-0.5 rounded shrink-0 font-medium"
+                  :class="{
+                    'bg-blue-100 text-blue-600': sup.relation_type === 'VOID_REPLACE',
+                    'bg-orange-100 text-orange-600': sup.relation_type === 'CREDIT_NOTE',
+                    'bg-purple-100 text-purple-600': sup.relation_type === 'RETURN_SUPPLEMENT',
+                  }"
+                >{{ relationTypeLabel(sup.relation_type) }}</span>
                 <span class="text-[10px] text-gray-400 shrink-0">{{ sup.uploader_name }}</span>
                 <button
                   @click.stop="deleteOrphanSupplement(sup)"
@@ -475,7 +580,18 @@ async function unlinkSupplement(supplement) {
                 </button>
               </div>
 
-              <!-- 備註：item_description（含待退貨憑證號碼）+ user_description -->
+              <!-- 建議配對 -->
+              <div v-if="sup.suggested_match"
+                class="flex items-center gap-1.5 mb-1.5 px-2 py-1 bg-amber-50 border border-amber-200 rounded-lg">
+                <span class="text-[9px] text-amber-600 font-medium">✨ 建議配對至 {{ sup.suggested_match.serial_number }}</span>
+                <button
+                  @click.stop="confirmSuggestedMatch(sup)"
+                  :disabled="isLinking"
+                  class="ml-auto text-[9px] px-1.5 py-0.5 bg-amber-500 hover:bg-amber-600 text-white rounded disabled:opacity-50 transition-colors"
+                >一鍵確認</button>
+              </div>
+
+              <!-- 備註：item_description + user_description -->
               <p v-if="sup.item_description" class="text-[10px] text-gray-500 truncate mb-0.5"
                 :title="sup.item_description">{{ sup.item_description }}</p>
               <p v-if="sup.user_description" class="text-[10px] text-gray-400 italic truncate mb-1.5"

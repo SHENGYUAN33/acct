@@ -13,7 +13,7 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from core.database import get_db
@@ -97,7 +97,7 @@ def create_session(
     status_code=status.HTTP_201_CREATED,
     summary="上傳單張圖片至 Session",
 )
-async def upload_image(
+def upload_image(
     session_id: uuid.UUID,
     file: UploadFile = File(..., description="圖片檔案"),
     sequence_order: int = Form(..., description="前端凍結的排列順序（0-based）"),
@@ -105,19 +105,19 @@ async def upload_image(
     db: Session = Depends(get_db),
 ) -> ImageUploadResponse:
     """
-    上傳單張圖片至指定 Session，並同步執行 OCR 辨識（classify_and_extract_with_retry）。
+    上傳單張圖片至指定 Session，儲存檔案並建立 SessionImage 記錄。
+    OCR 不在此同步執行，由 submit 後的背景任務統一處理。
 
     **重要**：sequence_order 由前端在使用者按下「送出」瞬間 Object.freeze() 凍結，
     後端永遠以此欄位排序，與圖片到達時間無關。
     """
-    # 驗證 content type
     if file.content_type and not file.content_type.startswith("image/"):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=f"不支援的檔案類型：{file.content_type}，請上傳圖片檔",
         )
 
-    img_record, ocr_completed, is_voucher = await liff_service.add_image(
+    img_record, ocr_completed, is_voucher = liff_service.add_image(
         db=db,
         session_id=session_id,
         upload_file=file,
@@ -204,33 +204,44 @@ def get_preview(
 @router.post(
     "/sessions/{session_id}/submit",
     response_model=SubmitSessionResponse,
-    summary="確認送出，建立費用報帳記錄",
+    summary="確認送出，觸發背景 OCR 與費用建立",
 )
-async def submit_session(
+def submit_session(
     session_id: uuid.UUID,
     body: SubmitSessionRequest,
+    background_tasks: BackgroundTasks,
     line_user_id: str = Depends(get_line_user_id),
     db: Session = Depends(get_db),
 ) -> SubmitSessionResponse:
     """
-    鎖定 Session（status → submitted）並依群組建立 Expense 記錄。
+    鎖定 Session（status → submitted）並立即回傳，背景任務執行 OCR + 建帳。
 
     流程：
-    1. 標記 session.status = "submitted"（防止重複送出）
-    2. 對 is_voucher=None 的圖片補跑 OCR
-    3. multi_split_logic_v2 依 sequence_order 切割群組
-    4. 每個群組呼叫 create_batch_expense(trigger_by="liff")
-    5. 孤立物品圖嘗試附加至 10 分鐘內的近期報帳
+    1. 標記 session.status = "submitted"（防止重複送出）、processing_status = "pending"
+    2. 立即回傳 200，使用者不再等待 OCR
+    3. 背景任務 process_session_background：OCR → multi_split_logic_v2 → create_batch_expense × N
     """
-    # 將 group_descriptions list 轉為 dict { group_index: description }
     desc_map: dict[int, str] = {
         g.group_index: g.description
         for g in body.group_descriptions
     }
 
-    return await liff_service.submit_session(
+    response = liff_service.submit_session(
         db=db,
         session_id=session_id,
         group_descriptions=desc_map,
         waiting_return_ref=body.waiting_return_ref,
     )
+
+    background_tasks.add_task(
+        liff_service.process_session_background,
+        session_id=session_id,
+        group_descriptions=desc_map,
+        waiting_return_ref=body.waiting_return_ref,
+        is_return_supplement=body.is_return_supplement,
+        wr_original_invoice=body.wr_original_invoice,
+        wr_original_date=body.wr_original_date,
+        wr_original_amount=body.wr_original_amount,
+    )
+
+    return response

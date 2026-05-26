@@ -10,6 +10,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -110,7 +111,24 @@ class SubmitSessionRequest(BaseModel):
     )
     waiting_return_ref: str | None = Field(
         default=None,
-        description="待退貨原始憑證號碼（LIFF Mode 2 顯式按鈕模式；None 表示非退貨上傳）",
+        description="[舊版] 待退貨原始憑證號碼（向後相容保留，新版請用 is_return_supplement）",
+    )
+    is_return_supplement: bool = Field(
+        default=False,
+        description="此次上傳為退貨補件（勾選後系統依 OCR 結果與填寫欄位自動判斷情境）",
+    )
+    wr_original_invoice: str | None = Field(
+        default=None,
+        pattern=r'^[A-Z]{2}-?\d{8}$',
+        description="情境A：被替換的原始發票號碼（格式 AB-12345678）",
+    )
+    wr_original_date: str | None = Field(
+        default=None,
+        description="情境C：原始收據日期（YYYY-MM-DD）",
+    )
+    wr_original_amount: float | None = Field(
+        default=None,
+        description="情境C：原始收據金額（用於模糊比對）",
     )
 
 

@@ -152,6 +152,9 @@ export const fetchBatchExpenses = (expenseId) =>
 export const fetchWaitingReturns = () =>
   apiClient.get('/api/v1/expenses/waiting-returns')
 
+export const pairExpense = (supplementId, originalId) =>
+  apiClient.post(`/api/v1/expenses/${supplementId}/pair`, { original_expense_id: originalId })
+
 export const moveExpenseImage = (expenseId, imageId, targetExpenseId) =>
   apiClient.post(`/api/v1/expenses/${expenseId}/images/${imageId}/move`, {
     target_expense_id: targetExpenseId,

@@ -113,18 +113,17 @@ def save_uploaded_file(upload_file: UploadFile) -> str:
     return str(dest)
 
 
-async def add_image(
+def add_image(
     db: Session,
     session_id: uuid.UUID,
     upload_file: UploadFile,
     sequence_order: int,
-) -> tuple[SessionImage, bool, bool | None]:
+) -> tuple[SessionImage, bool, None]:
     """
-    儲存圖片並執行 OCR。
+    儲存圖片至 uploads/ 並建立 SessionImage 記錄。
+    OCR 不在此執行，由 submit 後的背景任務統一處理。
 
-    回傳：
-        (SessionImage, ocr_completed, is_voucher)
-        ocr_completed=True 時 is_voucher 有值，False 時為 None
+    回傳：(SessionImage, ocr_completed=False, is_voucher=None)
     """
     session = _get_session_or_404(db, session_id)
 
@@ -139,7 +138,7 @@ async def add_image(
     # 儲存檔案
     image_path = save_uploaded_file(upload_file)
 
-    # 建立 SessionImage 記錄（is_voucher=None 表示 OCR 尚未完成）
+    # 建立 SessionImage 記錄（is_voucher=None，等待背景任務 OCR 後填入）
     img_record = SessionImage(
         id=uuid.uuid4(),
         session_id=session_id,
@@ -156,24 +155,7 @@ async def add_image(
         "liff_service.add_image: session=%s seq=%d path=%s",
         session_id, sequence_order, image_path,
     )
-
-    # 同步執行 OCR（classify_and_extract_with_retry 已包含 retry + Semaphore 限速）
-    try:
-        ocr_result: VoucherOCRResult = await ocr_service.classify_and_extract_with_retry(image_path)
-        img_record.is_voucher = ocr_result.is_voucher if ocr_result.success else None
-        if ocr_result.success:
-            img_record.ocr_result = ocr_result.model_dump_json(
-                exclude={"success", "error", "raw_response"}
-            )
-        db.commit()
-        db.refresh(img_record)
-        return img_record, True, img_record.is_voucher
-    except Exception as exc:
-        logger.error(
-            "liff_service.add_image: OCR failed session=%s seq=%d: %s",
-            session_id, sequence_order, exc, exc_info=True,
-        )
-        return img_record, False, None
+    return img_record, False, None
 
 
 # ---------------------------------------------------------------------------
@@ -296,178 +278,252 @@ def get_session_preview(
 # 5. 確認送出
 # ---------------------------------------------------------------------------
 
-async def submit_session(
+def submit_session(
     db: Session,
     session_id: uuid.UUID,
-    group_descriptions: dict[int, str],
-    waiting_return_ref: str | None = None,
+    group_descriptions: dict[int, str],  # noqa: ARG001（由背景任務使用，此處僅驗證 session 狀態）
+    waiting_return_ref: str | None = None,  # noqa: ARG001
 ) -> SubmitSessionResponse:
     """
-    鎖定 session → 依 sequence_order 重跑 OCR（若 is_voucher 仍為 None）
-    → multi_split_logic_v2 → create_batch_expense。
+    鎖定 session（status → submitted）並立即回傳。
+    OCR、切割、建帳由 process_session_background() 背景任務執行。
 
-    group_descriptions: { group_index: description_text }
-    waiting_return_ref: 若使用者在 LIFF 勾選「待退貨物品照」，帶入原始憑證號碼
+    group_descriptions / waiting_return_ref 由 router 直接傳入背景任務，
+    此函式不使用，但保留同樣的簽名以維持呼叫介面一致。
     """
     session = _get_session_or_404(db, session_id)
-
-    # 鎖定，防止重複送出
     session.status = "submitted"
+    session.processing_status = "pending"
     db.commit()
+    return SubmitSessionResponse(
+        session_id=session_id,
+        created_expenses=[],
+        message="上傳已接受，費用建立中",
+    )
 
-    images: list[SessionImage] = sorted(session.images, key=lambda x: x.sequence_order)
-    if not images:
-        return SubmitSessionResponse(
-            session_id=session_id,
-            created_expenses=[],
-            message="Session 無圖片，跳過建帳",
-        )
 
-    # 取得 User 資訊（供 create_batch_expense 使用）
-    user = db.scalar(select(User).where(User.line_user_id == session.line_user_id))
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="使用者資料不存在")
-
-    uploader_name: str = user.real_name or user.name or session.line_user_id
-    uploader_dept: str = user.department or ""
-
-    # 針對 is_voucher=None 的圖片補跑 OCR
-    pending_ocr_tasks: list[tuple[int, SessionImage]] = [
-        (i, img) for i, img in enumerate(images) if img.is_voucher is None
-    ]
-    if pending_ocr_tasks:
-        ocr_coros = [
-            ocr_service.classify_and_extract_with_retry(img.image_path)
-            for _, img in pending_ocr_tasks
-        ]
-        extra_results: list[VoucherOCRResult] = list(await asyncio.gather(*ocr_coros))
-        for (_, img), result in zip(pending_ocr_tasks, extra_results):
-            if result.success:
-                img.is_voucher = result.is_voucher
+async def process_session_background(
+    session_id: uuid.UUID,
+    group_descriptions: dict[int, str],
+    waiting_return_ref: str | None,
+    is_return_supplement: bool = False,
+    wr_original_invoice: str | None = None,
+    wr_original_date: str | None = None,
+    wr_original_amount: float | None = None,
+) -> None:
+    """
+    背景任務：對 session 所有圖片執行 OCR → multi_split_logic_v2 → create_batch_expense。
+    使用獨立的 SessionLocal() session，與 HTTP request 的 db session 完全隔離。
+    """
+    db = SessionLocal()
+    try:
+        session = db.get(UploadSession, session_id)
+        if not session:
+            logger.error("process_session_background: session %s not found", session_id)
+            return
+        session.processing_status = "processing"
         db.commit()
 
-    # 重新讀取（confirm after commit）
-    db.refresh(session)
-    images = sorted(session.images, key=lambda x: x.sequence_order)
+        images: list[SessionImage] = sorted(session.images, key=lambda x: x.sequence_order)
+        if not images:
+            session.processing_status = "done"
+            db.commit()
+            logger.info("process_session_background: session=%s 無圖片，跳過建帳", session_id)
+            return
 
-    # 準備 _ImageEntry 清單（timestamp=0，LIFF 以 sequence_order 排序，不依賴時序）
-    entries = [
-        _ImageEntry(path=img.image_path, timestamp=0, message_id=str(img.id))
-        for img in images
-    ]
+        user = db.scalar(select(User).where(User.line_user_id == session.line_user_id))
+        if not user:
+            logger.error(
+                "process_session_background: user not found session=%s line_user_id=%s",
+                session_id, session.line_user_id,
+            )
+            session.processing_status = "failed"
+            db.commit()
+            return
 
-    # 從 SessionImage.ocr_result 還原完整 VoucherOCRResult，
-    # 確保 create_batch_expense 能正確萃取金額、發票號碼等欄位
-    ocr_stubs: list[VoucherOCRResult] = []
-    for img in images:
-        if img.ocr_result:
-            try:
-                r = VoucherOCRResult.model_validate_json(img.ocr_result)
-                ocr_stubs.append(r)
-                continue
-            except Exception as exc:
-                logger.warning(
-                    "liff_service.submit_session: 還原 OCR JSON 失敗 session=%s seq=%d: %s",
-                    session_id, img.sequence_order, exc,
-                )
-        ocr_stubs.append(VoucherOCRResult(
-            success=img.is_voucher is not None,
-            is_voucher=img.is_voucher if img.is_voucher is not None else False,
-        ))
+        uploader_name: str = user.real_name or user.name or session.line_user_id
+        uploader_dept: str = user.department or ""
 
-    # 切割模式：batch = 依憑證斷點切割；single = 全部視為一群組
-    if settings.liff_submit_mode == "batch":
-        groups_raw, orphan_paths = multi_split_logic_v2(entries, ocr_stubs)
-    else:
-        groups_raw = [([ e.path for e in entries ], ocr_stubs)]
-        orphan_paths = []
+        # 向後相容：舊版 waiting_return_ref → 新版退貨補件欄位橋接
+        if not is_return_supplement and waiting_return_ref:
+            is_return_supplement = True
+            wr_original_invoice = waiting_return_ref
 
-    # 待退貨補件模式：孤立圖片不自動接合到近期報帳，直接併入 groups 建立 RETURN_SUPPLEMENT
-    if orphan_paths and waiting_return_ref:
-        groups_raw.append((
-            orphan_paths,
-            [VoucherOCRResult(success=False, is_voucher=False)] * len(orphan_paths),
-        ))
-        orphan_paths = []
-        logger.info(
-            "liff_service.submit_session: waiting_return_ref=%s, redirect %d orphan image(s) into groups",
-            waiting_return_ref, len(groups_raw[-1][0]),
+        # 對所有 is_voucher=None 的圖片執行 OCR（add_image 不再執行 OCR，故全部需補跑）
+        pending_ocr_tasks: list[tuple[int, SessionImage]] = [
+            (i, img) for i, img in enumerate(images) if img.is_voucher is None
+        ]
+        if pending_ocr_tasks:
+            ocr_coros = [
+                ocr_service.classify_and_extract_with_retry(img.image_path)
+                for _, img in pending_ocr_tasks
+            ]
+            # return_exceptions=True 確保單張失敗不中斷其餘圖片
+            extra_results: list[VoucherOCRResult | BaseException] = list(
+                await asyncio.gather(*ocr_coros, return_exceptions=True)
+            )
+            for (_, img), result in zip(pending_ocr_tasks, extra_results):
+                if isinstance(result, BaseException):
+                    logger.error(
+                        "process_session_background: OCR failed session=%s seq=%d: %s",
+                        session_id, img.sequence_order, result,
+                    )
+                    continue
+                if result.success:
+                    img.is_voucher = result.is_voucher
+                    img.ocr_result = result.model_dump_json(
+                        exclude={"success", "error", "raw_response"}
+                    )
+                else:
+                    img.is_voucher = False
+            db.commit()
+
+        # 重新讀取（confirm after commit）
+        db.refresh(session)
+        images = sorted(session.images, key=lambda x: x.sequence_order)
+
+        # 準備 _ImageEntry 清單（timestamp=0，LIFF 以 sequence_order 排序，不依賴時序）
+        entries = [
+            _ImageEntry(path=img.image_path, timestamp=0, message_id=str(img.id))
+            for img in images
+        ]
+
+        # 從 SessionImage.ocr_result 還原完整 VoucherOCRResult
+        ocr_stubs: list[VoucherOCRResult] = []
+        for img in images:
+            if img.ocr_result:
+                try:
+                    r = VoucherOCRResult.model_validate_json(img.ocr_result)
+                    ocr_stubs.append(r)
+                    continue
+                except Exception as exc:
+                    logger.warning(
+                        "process_session_background: 還原 OCR JSON 失敗 session=%s seq=%d: %s",
+                        session_id, img.sequence_order, exc,
+                    )
+            ocr_stubs.append(VoucherOCRResult(
+                success=img.is_voucher is not None,
+                is_voucher=img.is_voucher if img.is_voucher is not None else False,
+            ))
+
+        # 情境B：偵測到折讓單時，強制所有圖片合併為單一群組（不拆分）
+        has_credit_note = is_return_supplement and any(
+            r.voucher_category == "CREDIT_NOTE" for r in ocr_stubs
         )
 
-    batch_group_id = uuid.uuid4() if groups_raw else None
-    created_expenses: list[CreatedExpenseItem] = []
-
-    # 處理孤立物品圖（waiting_return_ref 時已提前清空 orphan_paths，此區塊不執行）
-    orphan_attached = False
-    if orphan_paths:
-        resolved = relation_service.attach_orphan_images_to_recent_expense(
-            db, user.id, orphan_paths, window_minutes=10
-        )
-        if resolved:
-            orphan_attached = True
+        # 切割模式：batch = 依憑證斷點切割；single = 全部視為一群組
+        if has_credit_note:
+            groups_raw = [([e.path for e in entries], ocr_stubs)]
+            orphan_paths = []
+            logger.info(
+                "process_session_background: CREDIT_NOTE detected session=%s, force single group",
+                session_id,
+            )
+        elif settings.liff_submit_mode == "batch":
+            groups_raw, orphan_paths = multi_split_logic_v2(entries, ocr_stubs)
         else:
+            groups_raw = [([e.path for e in entries], ocr_stubs)]
+            orphan_paths = []
+
+        # 退貨補件模式：孤立圖片不自動接合到近期報帳，直接併入 groups
+        if orphan_paths and is_return_supplement:
+            groups_raw.append((
+                orphan_paths,
+                [VoucherOCRResult(success=False, is_voucher=False)] * len(orphan_paths),
+            ))
+            orphan_paths = []
+            logger.info(
+                "process_session_background: is_return_supplement=True, redirect %d orphan image(s) into groups",
+                len(groups_raw[-1][0]),
+            )
+
+        batch_group_id = uuid.uuid4() if groups_raw else None
+
+        # 處理孤立物品圖
+        if orphan_paths:
+            resolved = relation_service.attach_orphan_images_to_recent_expense(
+                db, user.id, orphan_paths, window_minutes=10
+            )
+            if not resolved:
+                try:
+                    expense_service.create_batch_expense(
+                        db=db,
+                        user_id=user.id,
+                        pending_images=orphan_paths,
+                        ocr_results=[VoucherOCRResult(success=False, is_voucher=False)] * len(orphan_paths),
+                        user_description="",
+                        uploader_name=uploader_name,
+                        uploader_dept=uploader_dept,
+                        trigger_by="liff_orphan",
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "process_session_background: orphan create_batch_expense failed session=%s: %s",
+                        session_id, exc, exc_info=True,
+                    )
+
+        # 每個群組建立一筆 Expense
+        for group_idx, (group_paths, group_ocr_stubs) in enumerate(groups_raw):
+            description = group_descriptions.get(group_idx, "")
             try:
-                expense_service.create_batch_expense(
+                expense = expense_service.create_batch_expense(
                     db=db,
                     user_id=user.id,
-                    pending_images=orphan_paths,
-                    ocr_results=[VoucherOCRResult(success=False, is_voucher=False)] * len(orphan_paths),
-                    user_description="",
+                    pending_images=group_paths,
+                    ocr_results=group_ocr_stubs,
+                    user_description=description,
                     uploader_name=uploader_name,
                     uploader_dept=uploader_dept,
-                    trigger_by="liff_orphan",
+                    trigger_by="liff",
+                    group_id=batch_group_id,
+                    skip_auto_link=is_return_supplement,
+                )
+                if is_return_supplement:
+                    # 情境B：OCR 偵測到折讓單
+                    if any(r.voucher_category == "CREDIT_NOTE" for r in group_ocr_stubs):
+                        expense.relation_type = "CREDIT_NOTE"
+                    # 情境A：使用者填了舊發票號碼
+                    elif wr_original_invoice:
+                        expense.relation_type = "VOID_REPLACE"
+                        expense.referenced_invoice_number = wr_original_invoice
+                    # 情境C：填了日期＋金額
+                    elif wr_original_date and wr_original_amount:
+                        expense.relation_type = "RETURN_SUPPLEMENT"
+                        extra = f"換貨收據，原收據日期：{wr_original_date} 金額：{wr_original_amount}"
+                        expense.item_description = f"{description} | {extra}" if description else extra
+                    # 未知：僅勾選補件但未填詳細資料
+                    else:
+                        expense.relation_type = "RETURN_SUPPLEMENT"
+                    db.commit()
+                    logger.info(
+                        "process_session_background: %s group=%d serial=%s",
+                        expense.relation_type, group_idx, expense.serial_number,
+                    )
+                logger.info(
+                    "process_session_background: created expense group=%d serial=%s session=%s",
+                    group_idx, expense.serial_number, session_id,
                 )
             except Exception as exc:
                 logger.error(
-                    "liff_service.submit_session: orphan create_batch_expense failed session=%s: %s",
-                    session_id, exc, exc_info=True,
+                    "process_session_background: create_batch_expense failed group=%d session=%s: %s",
+                    group_idx, session_id, exc, exc_info=True,
                 )
 
-    # 每個群組建立一筆 Expense
-    for group_idx, (group_paths, group_ocr_stubs) in enumerate(groups_raw):
-        description = group_descriptions.get(group_idx, "")
+        session.processing_status = "done"
+        db.commit()
+        logger.info("process_session_background: session=%s done", session_id)
+
+    except Exception as exc:
+        logger.error(
+            "process_session_background: FATAL session=%s: %s",
+            session_id, exc, exc_info=True,
+        )
         try:
-            expense = expense_service.create_batch_expense(
-                db=db,
-                user_id=user.id,
-                pending_images=group_paths,
-                ocr_results=group_ocr_stubs,
-                user_description=description,
-                uploader_name=uploader_name,
-                uploader_dept=uploader_dept,
-                trigger_by="liff",
-                group_id=batch_group_id,
-            )
-            # LIFF Mode 2：使用者明確標記此批次為退貨物品照
-            if waiting_return_ref:
-                expense.relation_type = "RETURN_SUPPLEMENT"
-                expense.referenced_invoice_number = waiting_return_ref
-                # 將備註與待退貨憑證號碼寫入 item_description，解除配對後仍可追溯原始憑證來源
-                ref_note = f"待退貨補件，原始憑證：{waiting_return_ref}"
-                expense.item_description = f"{description} | {ref_note}" if description else ref_note
+            s = db.get(UploadSession, session_id)
+            if s:
+                s.processing_status = "failed"
                 db.commit()
-                logger.info(
-                    "liff_service.submit_session: RETURN_SUPPLEMENT group=%d serial=%s invoice=%s",
-                    group_idx, expense.serial_number, waiting_return_ref,
-                )
-            created_expenses.append(CreatedExpenseItem(
-                group_index=group_idx,
-                expense_id=expense.id,
-                serial_number=expense.serial_number,
-            ))
-            logger.info(
-                "liff_service.submit_session: created expense group=%d serial=%s session=%s",
-                group_idx, expense.serial_number, session_id,
-            )
-        except Exception as exc:
-            logger.error(
-                "liff_service.submit_session: create_batch_expense failed group=%d session=%s: %s",
-                group_idx, session_id, exc, exc_info=True,
-            )
-
-    return SubmitSessionResponse(
-        session_id=session_id,
-        created_expenses=created_expenses,
-        orphan_attached=orphan_attached,
-        message=f"成功建立 {len(created_expenses)} 筆報帳",
-    )
+        except Exception:
+            pass
+    finally:
+        db.close()

@@ -49,7 +49,9 @@ async function toggleExpand(expense) {
       try {
         const res = await fetchExpenses({ referenced_invoice_number: expense.invoice_number, page_size: 5 })
         const items = res.data?.data?.items ?? []
-        const sup = items.find(e => e.relation_type === 'RETURN_SUPPLEMENT') ?? null
+        const sup = items.find(e =>
+          ['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE'].includes(e.relation_type)
+        ) ?? null
         supplementCache.value = { ...supplementCache.value, [id]: normalizeImageUrls(sup) }
       } catch {
         supplementCache.value = { ...supplementCache.value, [id]: 'error' }
@@ -141,10 +143,11 @@ function formatAmount(amount) {
   return `$${Number(amount).toLocaleString()}`
 }
 
-// 已配對的 RETURN_SUPPLEMENT 不在主表格顯示（改由父憑證展開子列呈現）
+// 已配對的補件（parent_id 已設定）不在主表格顯示（改由父憑證展開子列呈現）
 const visibleExpenses = computed(() =>
   store.paginatedExpenses.filter(e =>
-    !(e.relation_type === 'RETURN_SUPPLEMENT' && e.referenced_invoice_number)
+    !(e.relation_type === 'RETURN_SUPPLEMENT' && e.referenced_invoice_number) &&
+    !e.parent_id
   )
 )
 
@@ -674,13 +677,32 @@ function onDragEnd() {
                   >
                     <Trash2 :size="13" />
                   </button>
+                  <button
+                    @click="openBatchModal(supplementCache[expense.id])"
+                    class="w-7 h-7 bg-green-500 hover:bg-green-600 text-white rounded flex items-center justify-center transition-colors"
+                    title="批次組詳情"
+                  >
+                    <Plus :size="13" />
+                  </button>
                 </div>
               </td>
 
-              <!-- td10: 審核狀態 -->
+              <!-- td10: 審核狀態 + 情境類型 badge -->
               <td class="px-3 py-1.5 whitespace-nowrap">
                 <div class="flex items-center gap-1 flex-wrap">
                   <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-600 border border-purple-200">補件</span>
+                  <span
+                    v-if="supplementCache[expense.id]?.relation_type === 'VOID_REPLACE'"
+                    class="text-[9px] px-1 py-0.5 rounded bg-blue-100 text-blue-600"
+                  >換新發票</span>
+                  <span
+                    v-else-if="supplementCache[expense.id]?.relation_type === 'CREDIT_NOTE'"
+                    class="text-[9px] px-1 py-0.5 rounded bg-orange-100 text-orange-600"
+                  >折讓單</span>
+                  <span
+                    v-else-if="supplementCache[expense.id]?.relation_type === 'RETURN_SUPPLEMENT'"
+                    class="text-[9px] px-1 py-0.5 rounded bg-purple-100 text-purple-600"
+                  >換貨收據</span>
                 </div>
               </td>
 

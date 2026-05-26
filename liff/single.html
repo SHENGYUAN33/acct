@@ -281,22 +281,42 @@
       <textarea class="note-textarea" id="note-input" rows="3" placeholder="輸入備注"></textarea>
     </div>
 
-    <!-- 待退貨標記（enable_waiting_return_liff_button=true 時顯示） -->
+    <!-- 退貨補件標記（enable_waiting_return_liff_button=true 時顯示） -->
     <div id="waiting-return-section" style="display:none; margin-top:16px; background:#faf5ff; border:1px solid #d8b4fe; border-radius:12px; padding:16px;">
       <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:14px; font-weight:600; color:#7e22ce;">
-        <input type="checkbox" id="is-waiting-return" style="width:18px; height:18px; accent-color:#7c3aed;" />
-        此上傳為退貨物品照
+        <input type="checkbox" id="is-return-supplement" style="width:18px; height:18px; accent-color:#7c3aed;" />
+        此為退貨補件
       </label>
       <div id="waiting-return-input-wrap" style="display:none; margin-top:12px;">
-        <label style="font-size:13px; color:#6b7280; display:block; margin-bottom:6px;">原始憑證號碼（格式：AB-12345678）</label>
+        <label style="font-size:13px; color:#6b7280; display:block; margin-bottom:6px;">舊憑證號碼（選填，格式：AB-12345678）</label>
         <input
           type="text"
-          id="waiting-return-invoice"
+          id="wr-original-invoice"
           placeholder="AB-12345678"
           maxlength="11"
           style="width:100%; box-sizing:border-box; border:1px solid #c4b5fd; border-radius:8px; padding:10px 12px; font-size:14px; font-family:monospace; outline:none;"
         />
-        <p style="font-size:11px; color:#9ca3af; margin-top:6px;">輸入實體憑證上的號碼，方便審核人員配對退貨物品照</p>
+        <p style="font-size:12px; color:#9ca3af; margin-top:8px; margin-bottom:8px;">若無號碼，填舊收據的日期與金額：</p>
+        <div style="display:flex; gap:10px;">
+          <div style="flex:1;">
+            <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px;">日期</label>
+            <input
+              type="date"
+              id="wr-original-date"
+              style="width:100%; box-sizing:border-box; border:1px solid #c4b5fd; border-radius:8px; padding:9px 10px; font-size:13px; outline:none;"
+            />
+          </div>
+          <div style="flex:1;">
+            <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px;">金額</label>
+            <input
+              type="number"
+              id="wr-original-amount"
+              placeholder="0"
+              min="0"
+              style="width:100%; box-sizing:border-box; border:1px solid #c4b5fd; border-radius:8px; padding:9px 10px; font-size:13px; outline:none;"
+            />
+          </div>
+        </div>
       </div>
     </div>
 
@@ -320,15 +340,7 @@
         <div class="upload-status-list" id="upload-status-list"></div>
       </div>
 
-      <!-- 憑證數量超過 1 張時顯示 -->
-      <div id="step-2-error" class="hidden" style="padding: 0 4px 20px;">
-        <div class="error-box">
-          ⚠️ 偵測到 <strong id="voucher-error-count">0</strong> 張憑證，每次只能上傳一筆費用（最多 1 張憑證）。請重新選擇照片，每次只保留 1 張憑證。
-        </div>
-        <div class="mt-16">
-          <button class="btn btn-ghost" onclick="resetAll()">重新選擇照片</button>
-        </div>
-      </div>
+
     </div>
 
     <!-- 成功畫面 -->
@@ -573,7 +585,6 @@ async function startUpload() {
   // 顯示 Step 2 loading
   document.getElementById('step-2-loading').classList.remove('hidden')
   document.getElementById('step-2-success').classList.add('hidden')
-  document.getElementById('step-2-error').classList.add('hidden')
   showStep(2)
 
   const bar        = document.getElementById('progress-bar')
@@ -607,14 +618,10 @@ async function startUpload() {
       return res.json()
     })
     .then(data => {
-      photo.imageId   = data.image.image_id
-      photo.isVoucher = data.is_voucher
-      photo.uploaded  = true
-      const label = photo.isVoucher === true  ? '憑證 🟦'
-                  : photo.isVoucher === false ? '物品照'
-                  : '未辨識'
+      photo.imageId  = data.image.image_id
+      photo.uploaded = true
       const el = document.getElementById(`us-${photo.localId}`)
-      if (el) el.innerHTML = `<span class="ustat-icon">✅</span> 第 ${idx + 1} 張 — ${label}`
+      if (el) el.innerHTML = `<span class="ustat-icon">✅</span> 第 ${idx + 1} 張 — 已上傳`
     })
     .catch(err => {
       photo.error = true
@@ -631,28 +638,26 @@ async function startUpload() {
 
   await Promise.all(uploadTasks)
 
-  // OCR 完成後驗證憑證數量：0 或 1 張才允許送出
-  const voucherCount = photos.filter(p => p.isVoucher === true).length
-  if (voucherCount > 1) {
-    document.getElementById('voucher-error-count').textContent = voucherCount
-    document.getElementById('step-2-error').classList.remove('hidden')
-    isUploading = false
-    return
-  }
-
   // 送出
   bar.style.width = '90%'
   msgEl.textContent = '送出中...'
 
-  const noteText        = document.getElementById('note-input').value.trim()
-  const isWaitingReturn = document.getElementById('is-waiting-return')?.checked ?? false
-  const wrInvoiceValue  = (document.getElementById('waiting-return-invoice')?.value ?? '').trim()
-  const waitingReturnRef = (isWaitingReturn && wrInvoiceValue) ? wrInvoiceValue : null
+  const noteText             = document.getElementById('note-input').value.trim()
+  const isReturnSupplement   = document.getElementById('is-return-supplement')?.checked ?? false
+  const wrOriginalInvoice    = (document.getElementById('wr-original-invoice')?.value ?? '').trim() || null
+  const wrOriginalDate       = (document.getElementById('wr-original-date')?.value ?? '').trim() || null
+  const wrAmountRaw          = document.getElementById('wr-original-amount')?.value
+  const wrOriginalAmount     = wrAmountRaw ? parseFloat(wrAmountRaw) : null
 
   try {
     await apiPost(`/liff/sessions/${sessionId}/submit`, {
       group_descriptions: [{ group_index: 0, description: noteText }],
-      ...(waitingReturnRef ? { waiting_return_ref: waitingReturnRef } : {})
+      ...(isReturnSupplement ? {
+        is_return_supplement: true,
+        ...(wrOriginalInvoice ? { wr_original_invoice: wrOriginalInvoice } : {}),
+        ...(wrOriginalDate    ? { wr_original_date: wrOriginalDate }       : {}),
+        ...(wrOriginalAmount !== null ? { wr_original_amount: wrOriginalAmount } : {}),
+      } : {})
     })
     bar.style.width = '100%'
     setTimeout(() => {
@@ -698,10 +703,14 @@ async function resetAll() {
   renderPhotoGrid()
   btnUpload.disabled = true
 
-  const wrCheckbox = document.getElementById('is-waiting-return')
+  const wrCheckbox = document.getElementById('is-return-supplement')
   if (wrCheckbox) wrCheckbox.checked = false
-  const wrInvoice = document.getElementById('waiting-return-invoice')
+  const wrInvoice = document.getElementById('wr-original-invoice')
   if (wrInvoice) wrInvoice.value = ''
+  const wrDate = document.getElementById('wr-original-date')
+  if (wrDate) wrDate.value = ''
+  const wrAmount = document.getElementById('wr-original-amount')
+  if (wrAmount) wrAmount.value = ''
   const wrInputWrap = document.getElementById('waiting-return-input-wrap')
   if (wrInputWrap) wrInputWrap.style.display = 'none'
 
@@ -727,7 +736,7 @@ let _wrListenerAdded = false
 function initWaitingReturnSection() {
   if (ENABLE_WAITING_RETURN_LIFF_BUTTON !== true && ENABLE_WAITING_RETURN_LIFF_BUTTON !== 'true') return
   const section   = document.getElementById('waiting-return-section')
-  const checkbox  = document.getElementById('is-waiting-return')
+  const checkbox  = document.getElementById('is-return-supplement')
   const inputWrap = document.getElementById('waiting-return-input-wrap')
 
   if (section) section.style.display = 'block'

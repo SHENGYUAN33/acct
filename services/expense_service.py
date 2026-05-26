@@ -644,6 +644,7 @@ def create_batch_expense(
     uploader_dept: str,
     trigger_by: str | None = None,
     group_id: uuid.UUID | None = None,
+    skip_auto_link: bool = False,
 ) -> Expense:
     """
     批次報帳彙整：將多張發票/憑證圖片整合為單一 Expense 記錄。
@@ -836,10 +837,33 @@ def create_batch_expense(
     db.refresh(expense)
 
     # ── 8. 自動關聯（情境 2/3A/3B）── 在 commit 之後執行，失敗不影響已建立的報帳
-    from services import relation_service
-    expense = relation_service.auto_link_records(db, expense, ocr_results, user_description)
+    if not skip_auto_link:
+        from services import relation_service
+        expense = relation_service.auto_link_records(db, expense, ocr_results, user_description)
 
     return expense
+
+
+def pair_expenses(
+    db: Session,
+    supplement_id: uuid.UUID,
+    original_id: uuid.UUID,
+) -> Expense:
+    """配對退貨補件與原始費用，設定 parent_id 與 referenced_invoice_number。"""
+    supplement = db.get(Expense, supplement_id)
+    original = db.get(Expense, original_id)
+    if not supplement or not original:
+        raise ValueError(f"pair_expenses: 費用不存在 supplement={supplement_id} original={original_id}")
+    supplement.parent_id = original.id
+    if original.invoice_number and not supplement.referenced_invoice_number:
+        supplement.referenced_invoice_number = original.invoice_number
+    db.commit()
+    db.refresh(supplement)
+    logger.info(
+        "pair_expenses: supplement=%s → original=%s",
+        supplement.serial_number, original.serial_number,
+    )
+    return supplement
 
 
 def get_expense_images(

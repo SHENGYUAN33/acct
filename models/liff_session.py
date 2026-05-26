@@ -32,6 +32,10 @@ class UploadSession(Base):
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default="uploading", server_default="uploading"
     )
+    # 背景 OCR / 建帳任務狀態：pending | processing | done | failed
+    processing_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

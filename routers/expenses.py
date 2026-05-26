@@ -148,37 +148,58 @@ def list_waiting_returns(
 ) -> dict:
     """
     回傳所有待退貨相關案件：
-    - cases：每個 WAITING_RETURN 原始憑證 + 對應的 RETURN_SUPPLEMENT 補件（可能無）
-    - orphan_supplements：有 RETURN_SUPPLEMENT 但找不到對應 WAITING_RETURN 的孤立補件
+    - cases：WAITING_RETURN 原始憑證 + 已自動配對的補件
+    - orphan_supplements：尚未配對的退貨補件（三種情境：VOID_REPLACE/CREDIT_NOTE/RETURN_SUPPLEMENT）
     - total：WAITING_RETURN 案件數（用於 badge）
+
+    左側（cases）自動納入被補件以 referenced_invoice_number 引用的原始憑證，
+    即使原始憑證不是 WAITING_RETURN 狀態。
+    右側補件帶有 suggested_match，前端可一鍵確認配對。
     """
     # Step 1：取所有 WAITING_RETURN 原始憑證
-    invoices: list[Expense] = list(db.scalars(
+    wr_invoices: list[Expense] = list(db.scalars(
         select(Expense).where(
             Expense.status == ExpenseStatus.WAITING_RETURN,
             Expense.is_active == True,
         ).order_by(Expense.created_at.desc())
     ).all())
 
-    # Step 2：取所有 RETURN_SUPPLEMENT 補件（含 COMPLETED，供展開追蹤歷史用）
+    # Step 2：取所有尚未配對的退貨補件（三種情境，parent_id IS NULL）
     supplements: list[Expense] = list(db.scalars(
         select(Expense).where(
-            Expense.relation_type == "RETURN_SUPPLEMENT",
+            Expense.relation_type.in_(["VOID_REPLACE", "CREDIT_NOTE", "RETURN_SUPPLEMENT"]),
+            Expense.parent_id.is_(None),
             Expense.is_active == True,
         ).order_by(Expense.created_at.desc())
     ).all())
 
-    # Step 3：以 invoice_number 建立 index，讓補件配對原始憑證
+    # Step 3：以 invoice_number 建立可查找的 index
     invoice_by_number: dict[str, Expense] = {
         inv.invoice_number: inv
-        for inv in invoices
+        for inv in wr_invoices
         if inv.invoice_number
     }
-    matched_invoice_ids: set[uuid.UUID] = set()
+    invoice_by_id: dict[uuid.UUID, Expense] = {inv.id: inv for inv in wr_invoices}
 
+    # Step 4：VOID_REPLACE 補件有 referenced_invoice_number 時，自動拉入原始憑證（不限 WAITING_RETURN）
+    for sup in supplements:
+        if sup.referenced_invoice_number and sup.referenced_invoice_number not in invoice_by_number:
+            original = db.scalar(
+                select(Expense).where(
+                    Expense.invoice_number == sup.referenced_invoice_number,
+                    Expense.is_active == True,
+                ).order_by(Expense.created_at.desc()).limit(1)
+            )
+            if original and original.id not in invoice_by_id:
+                invoice_by_number[original.invoice_number] = original
+                invoice_by_id[original.id] = original
+
+    all_left_invoices = list(invoice_by_id.values())
+    matched_invoice_ids: set[uuid.UUID] = set()
     cases = []
     orphan_supplements = []
 
+    # Step 5：補件配對原始憑證
     for sup in supplements:
         matched_invoice: Expense | None = None
         if sup.referenced_invoice_number:
@@ -192,24 +213,60 @@ def list_waiting_returns(
         else:
             # COMPLETED 補件已完成配對流程，不再顯示於孤立補件區
             if sup.status != ExpenseStatus.COMPLETED:
-                orphan_supplements.append(ExpenseWithImages.model_validate(sup).model_dump())
+                sup_data = ExpenseWithImages.model_validate(sup).model_dump()
+                # 若補件有 referenced_invoice_number 但原始憑證尚在左側，標記建議配對
+                if sup.referenced_invoice_number:
+                    orig = invoice_by_number.get(sup.referenced_invoice_number)
+                    sup_data["suggested_match"] = (
+                        {"expense_id": str(orig.id), "serial_number": orig.serial_number}
+                        if orig else None
+                    )
+                else:
+                    sup_data["suggested_match"] = None
+                orphan_supplements.append(sup_data)
 
-    # Step 4：WAITING_RETURN 原始憑證若尚無對應補件，單獨列出（supplement=null）
-    for inv in invoices:
+    # Step 6：左側原始憑證若尚無對應補件，單獨列出（supplement=null）
+    for inv in all_left_invoices:
         if inv.id not in matched_invoice_ids:
             cases.append({
                 "invoice": ExpenseWithImages.model_validate(inv).model_dump(),
                 "supplement": None,
             })
 
+    wr_count = sum(1 for inv in invoice_by_id.values() if inv.status == ExpenseStatus.WAITING_RETURN)
+
     return {
         "status": "success",
         "data": {
             "cases": cases,
             "orphan_supplements": orphan_supplements,
-            "total": len(invoices),  # badge 顯示 WAITING_RETURN 案件數
+            "total": wr_count,
         },
         "message": "ok",
+    }
+
+
+# ── POST /expenses/{id}/pair（配對退貨補件與原始費用）──────────────
+# ⚠️ 必須在 /{expense_id} 之前定義
+class PairRequest(BaseModel):
+    original_expense_id: uuid.UUID
+
+
+@router.post("/expenses/{expense_id}/pair", response_model=dict)
+def pair_expense(
+    expense_id: uuid.UUID,
+    body: PairRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """配對退貨補件（補件 → parent_id 指向原始費用）。"""
+    try:
+        expense = expense_service.pair_expenses(db, expense_id, body.original_expense_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {
+        "status": "success",
+        "data": ExpenseRead.model_validate(expense).model_dump(),
+        "message": "配對成功",
     }
 
 
