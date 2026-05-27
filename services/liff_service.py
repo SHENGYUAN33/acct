@@ -10,9 +10,12 @@
 
 import asyncio
 import logging
+import re
 import shutil
 import uuid
 from datetime import datetime, timedelta, timezone
+
+_LINE_UID_RE = re.compile(r"^U[0-9a-f]{32}$")
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
@@ -31,7 +34,7 @@ from schemas.liff import (
     CreatedExpenseItem,
 )
 from schemas.ocr import VoucherOCRResult
-from services import expense_service, ocr_service, relation_service
+from services import expense_service, line_service, ocr_service, relation_service
 from services.auto_split_service import (
     _ImageEntry,
     multi_split_logic_v2,
@@ -62,6 +65,21 @@ def create_session(
 
     # 查詢 user_id（FK）
     user = db.scalar(select(User).where(User.line_user_id == line_user_id))
+
+    # 名冊綁定檢查：real_name 為 null 表示尚未完成綁定
+    if not user or not user.real_name:
+        line_service.set_user_state(db, line_user_id, "BINDING_REAL_NAME")
+        if _LINE_UID_RE.match(line_user_id):
+            line_service.push_text(
+                line_user_id,
+                "⚠️ 您尚未完成身分設定，無法使用報帳功能。\n\n"
+                "請直接在此輸入您的【姓名】完成設定。\n"
+                "（若姓名未登記，請先聯繫管理員）",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="尚未完成身分設定\n請回到 LINE 對話視窗，輸入您的姓名完成設定。\n若姓名未登記，請聯繫管理員。",
+        )
 
     now = datetime.now(tz=timezone.utc)
     session = UploadSession(

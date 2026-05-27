@@ -7,11 +7,13 @@ import math
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.database import get_db
 from routers.auth import get_current_user
 from schemas.roster import RosterCreate, RosterImportResult, RosterListResponse, RosterRead, RosterUpdate
+from models.user import User
 from services import roster_service
 
 logger = logging.getLogger(__name__)
@@ -162,9 +164,25 @@ def unbind_roster(
     db: Session = Depends(get_db),
 ) -> dict:
     """解除員工的 LINE 綁定狀態（清空 line_user_id / is_bound=False / bound_at=None）。"""
+    # 先取得 line_user_id，解除後才能回去清 users 表
+    roster_entry = roster_service.get_roster_by_id(db, roster_id)
+    if roster_entry is None:
+        raise HTTPException(status_code=404, detail="找不到指定的員工名冊記錄")
+
+    bound_line_user_id = roster_entry.line_user_id
+
     entry = roster_service.unbind_roster_entry(db, roster_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="找不到指定的員工名冊記錄")
+
+    # 同步清空 users 表的 real_name / department，讓 LIFF 與 Webhook 生效
+    if bound_line_user_id:
+        user = db.scalar(select(User).where(User.line_user_id == bound_line_user_id))
+        if user:
+            user.real_name = None
+            user.department = None
+            db.commit()
+            logger.info("unbind_roster: cleared real_name/department for line_user_id=%s", bound_line_user_id)
 
     return {
         "status": "success",

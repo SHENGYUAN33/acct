@@ -1,13 +1,13 @@
 """LINE Webhook 路由 — 接收並處理來自 LINE 平台的事件。"""
 
 import logging
-import re
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from starlette.requests import ClientDisconnect
 from linebot.v3 import WebhookParser
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.webhooks import (
+    FollowEvent,
     MessageEvent,
     TextMessageContent,
 )
@@ -54,6 +54,13 @@ async def webhook(
         line_user_id: str = event.source.user_id
         logger.info("webhook event: type=%s user=%s", type(event).__name__, line_user_id)
 
+        if isinstance(event, FollowEvent):
+            line_service.push_text(
+                line_user_id,
+                "👋 歡迎使用劇組報帳系統！\n\n請輸入您的【姓名】以完成帳號綁定。",
+            )
+            continue
+
         if not isinstance(event, MessageEvent):
             continue
 
@@ -67,46 +74,53 @@ async def webhook(
             if user.real_name and user.department:
                 pass  # 已綁定，往下走
             else:
-                state = line_service.get_user_state(db, line_user_id)
-                step = state.get("step", "") if state else ""
-
-                if step == "BINDING_REAL_NAME" and isinstance(event.message, TextMessageContent):
-                    name_input = event.message.text.strip()
-                    if not name_input:
-                        line_service.reply_text(reply_token, "⚠️ 姓名不可為空白，請重新輸入：")
-                        continue
-
-                    result = roster_service.bind_line_user_by_name(db, name_input, line_user_id)
-
-                    if result is None:
-                        line_service.reply_text(
-                            reply_token,
-                            f"⚠️ 名冊中找不到「{name_input}」，請確認姓名是否正確後重新輸入。\n"
-                            f"（若有問題請聯繫製片組）",
-                        )
-                    elif isinstance(result, list):
-                        line_service.reply_text(
-                            reply_token,
-                            f"⚠️ 找到多筆相同姓名「{name_input}」，請聯繫管理員協助綁定。",
-                        )
-                    else:
-                        expense_service.update_user_real_name(db, line_user_id, result.name)
-                        expense_service.update_user_department(db, line_user_id, result.department)
-                        line_service.delete_user_state(db, line_user_id)
-                        line_service.reply_text(
-                            reply_token,
-                            f"✅ 設定完成，{result.name}（{result.department}）您好！\n"
-                            f"之後請透過選單開啟報帳頁面 📷",
-                        )
-                    continue
-                else:
+                # 非文字訊息：提示輸入姓名
+                if not isinstance(event.message, TextMessageContent):
                     line_service.set_user_state(db, line_user_id, "BINDING_REAL_NAME")
                     line_service.reply_text(
                         reply_token,
-                        "👋 歡迎使用劇組報帳系統！\n\n"
-                        "初次使用請輸入您的【姓名】完成設定：",
+                        "👋 歡迎使用劇組報帳系統！\n\n請輸入您的【姓名】完成設定：",
                     )
                     continue
+
+                name_input = event.message.text.strip()
+                if not name_input:
+                    line_service.reply_text(reply_token, "⚠️ 姓名不可為空白，請重新輸入：")
+                    continue
+
+                # 任何文字訊息都直接嘗試比對名冊，不需要兩步驟
+                try:
+                    result = roster_service.bind_line_user_by_name(db, name_input, line_user_id)
+                except Exception as exc:
+                    logger.error("webhook: 名冊綁定失敗 user=%s name=%r: %s", line_user_id, name_input, exc, exc_info=True)
+                    line_service.reply_text(
+                        reply_token,
+                        "⚠️ 綁定過程發生錯誤，請稍後再試或聯繫管理員。",
+                    )
+                    continue
+
+                if result is None:
+                    line_service.set_user_state(db, line_user_id, "BINDING_REAL_NAME")
+                    line_service.reply_text(
+                        reply_token,
+                        f"⚠️ 名冊中找不到「{name_input}」，請確認姓名是否正確後重新輸入。\n"
+                        f"（若有問題請聯繫管理員）",
+                    )
+                elif isinstance(result, list):
+                    line_service.reply_text(
+                        reply_token,
+                        f"⚠️ 找到多筆相同姓名「{name_input}」，請聯繫管理員協助綁定。",
+                    )
+                else:
+                    expense_service.update_user_real_name(db, line_user_id, result.name)
+                    expense_service.update_user_department(db, line_user_id, result.department)
+                    line_service.delete_user_state(db, line_user_id)
+                    line_service.reply_text(
+                        reply_token,
+                        f"✅ 設定完成，{result.name}（{result.department}）您好！\n"
+                        f"之後請透過選單開啟報帳頁面 📷",
+                    )
+                continue
 
         # --- 路徑 B：原有 Onboarding 流程 ---
         elif user.department is None:
@@ -152,63 +166,10 @@ async def webhook(
             )
             continue
 
-        # ── 進度查詢：指定單號（EXP-YYYYMM-NNNN）──
-        if re.fullmatch(r"EXP-\d{6}-\d{4}", text, re.IGNORECASE):
-            serial = text.upper()
-            target = expense_service.get_expense_by_serial_number(db, serial)
-            if not target:
-                line_service.reply_text(reply_token, f"❌ 查無單號「{serial}」，請確認後再試。")
-            else:
-                status_map = {
-                    "PENDING": "🔄 審核中",
-                    "APPROVED": "✅ 已核准",
-                    "REJECTED": "❌ 已退回",
-                    "NEEDS_MANUAL_REVIEW": "⚠️ 人工審核中",
-                    "SUPPLEMENTED": "⚠️ 已補件",
-                    "WAITING_RETURN": "📦 待退貨（未結清）",
-                    "COMPLETED": "✅ 已結清",
-                    "REPLACED_VOID": "🚫 已作廢（換單）",
-                }
-                status_text = status_map.get(target.status.value, target.status.value)
-                reject_line = f"\n退回原因：{target.reject_reason}" if target.reject_reason else ""
-                line_service.reply_text(
-                    reply_token,
-                    f"📋 報帳查詢結果\n\n"
-                    f"單號：{target.serial_number}\n"
-                    f"金額：{target.total_amount or '未辨識'}\n"
-                    f"日期：{target.expense_date or '未辨識'}\n"
-                    f"狀態：{status_text}{reject_line}",
-                )
-            continue
-
-        # ── 進度查詢：最近 3 筆 ──
-        if text in ("查詢進度", "查詢"):
-            recent = expense_service.get_recent_expenses_by_user(db, user.id, limit=3)
-            if not recent:
-                line_service.reply_text(reply_token, "目前尚無報帳紀錄。")
-            else:
-                status_map = {
-                    "PENDING": "🔄 審核中",
-                    "APPROVED": "✅ 已核准",
-                    "REJECTED": "❌ 已退回",
-                    "NEEDS_MANUAL_REVIEW": "⚠️ 人工審核中",
-                    "SUPPLEMENTED": "⚠️ 已補件",
-                    "WAITING_RETURN": "📦 待退貨（未結清）",
-                    "COMPLETED": "✅ 已結清",
-                    "REPLACED_VOID": "🚫 已作廢（換單）",
-                }
-                lines = ["📋 您的最近報帳紀錄：\n"]
-                num_icons = ["1️⃣", "2️⃣", "3️⃣"]
-                for i, e in enumerate(recent):
-                    status_text = status_map.get(e.status.value, e.status.value)
-                    lines.append(
-                        f"{num_icons[i]} {e.serial_number}\n"
-                        f"   💰 {e.total_amount or '未辨識'} ｜ 📅 {e.expense_date or '未辨識'}\n"
-                        f"   狀態：{status_text}"
-                    )
-                line_service.reply_text(reply_token, "\n\n".join(lines))
-            continue
-
-        # ── 其他文字：靜默忽略 ──
+        # ── 其他文字：引導使用者使用選單 ──
+        line_service.reply_text(
+            reply_token,
+            "請點選下方「報帳」選單開啟報帳頁面 📷",
+        )
 
     return {"status": "ok"}

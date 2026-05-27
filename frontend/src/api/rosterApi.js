@@ -61,7 +61,7 @@ export const downloadRosterTemplate = () => {
   const content = [
     'name,department,employee_id',
     '王小明,製片組,EMP001',
-    '（請依此格式填寫，employee_id 可留空）',
+    '李小華,攝影組,',
   ].join('\n')
 
   // 加 BOM 確保 Excel 正確顯示中文

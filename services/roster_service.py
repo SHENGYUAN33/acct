@@ -199,23 +199,36 @@ def bind_line_user_by_name(
     Returns:
         唯一匹配回傳 StaffRoster；多筆同名回傳 list；找不到回傳 None。
     """
-    matches: list[StaffRoster] = list(
+    all_matches: list[StaffRoster] = list(
         db.scalars(select(StaffRoster).where(StaffRoster.name == name))
     )
 
-    if not matches:
+    if not all_matches:
         logger.info("roster_service.bind_line_user_by_name: name=%r not found", name)
         return None
 
-    if len(matches) > 1:
+    # 若此 line_user_id 已綁定至其中一筆，視為重複綁定，直接回傳（冪等）
+    already_mine = next((m for m in all_matches if m.line_user_id == line_user_id), None)
+    if already_mine:
+        logger.info("roster_service.bind_line_user_by_name: name=%r already bound to same UID, idempotent", name)
+        return already_mine
+
+    # 只考慮尚未綁定的名冊項目作為候選
+    candidates: list[StaffRoster] = [m for m in all_matches if not m.is_bound]
+
+    if not candidates:
+        logger.info("roster_service.bind_line_user_by_name: name=%r all entries already bound to other UIDs", name)
+        return None
+
+    if len(candidates) > 1:
         logger.warning(
-            "roster_service.bind_line_user_by_name: found %d entries with name=%r, returning list",
-            len(matches),
+            "roster_service.bind_line_user_by_name: found %d unbound entries with name=%r, returning list",
+            len(candidates),
             name,
         )
-        return matches  # 由 webhook 層回覆同名提示
+        return candidates  # 由 webhook 層回覆同名提示
 
-    entry = matches[0]
+    entry = candidates[0]
     entry.line_user_id = line_user_id
     entry.is_bound = True
     entry.bound_at = datetime.now(timezone.utc)

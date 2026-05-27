@@ -9,11 +9,15 @@ const apiClient = axios.create({
   },
 })
 
-// ── Request Interceptor：注入 JWT Token ───────────────────────────
+// ── Request Interceptor：注入 JWT Token + 處理 FormData Content-Type ──
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('acctassist_token')
     if (token) config.headers.Authorization = `Bearer ${token}`
+    // FormData 上傳時讓瀏覽器自動帶 boundary，不可手動設 Content-Type
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type']
+    }
     return config
   },
   (error) => {

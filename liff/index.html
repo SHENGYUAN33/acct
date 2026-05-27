@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>AcctAssist 批次報帳</title>
 <!-- LINE LIFF SDK -->
-<script src="https://unpkg.com/@line/liff@2.22.3/dist/liff.min.js"></script>
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -332,6 +332,7 @@
   }
   #init-overlay .logo { font-size: 48px; }
   #init-overlay p { color: #6b7280; font-size: 14px; }
+  #init-overlay p.error { color: #b91c1c; font-size: 13px; white-space: pre-line; text-align: center; line-height: 1.6; }
 
   /* Utilities */
   .hidden { display: none !important; }
@@ -551,7 +552,13 @@ async function initLiff() {
     setupEventListeners()
   } catch (err) {
     console.error('[LIFF] init error:', err)
-    document.querySelector('#init-overlay p').textContent = '初始化失敗：' + (err.message || err)
+    const p = document.querySelector('#init-overlay p')
+    if (err.status === 403) {
+      p.className = 'error'
+      p.textContent = err.message
+    } else {
+      p.textContent = '初始化失敗：' + (err.message || err)
+    }
   }
 }
 
@@ -565,8 +572,10 @@ async function apiPost(path, body) {
     body: JSON.stringify(body)
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || `HTTP ${res.status}`)
+    const errBody = await res.json().catch(() => ({ detail: res.statusText }))
+    const err = new Error(errBody.detail || `HTTP ${res.status}`)
+    err.status = res.status
+    throw err
   }
   return res.json()
 }
