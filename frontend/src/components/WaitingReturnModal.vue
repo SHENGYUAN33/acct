@@ -591,11 +591,29 @@ async function unlinkSupplement(supplement) {
                 >一鍵確認</button>
               </div>
 
-              <!-- 備註：item_description + user_description -->
-              <p v-if="sup.item_description" class="text-[10px] text-gray-500 truncate mb-0.5"
-                :title="sup.item_description">{{ sup.item_description }}</p>
-              <p v-if="sup.user_description" class="text-[10px] text-gray-400 italic truncate mb-1.5"
-                :title="sup.user_description">{{ sup.user_description }}</p>
+              <!-- 發票資訊列 -->
+              <div class="flex flex-wrap gap-x-3 gap-y-0.5 mb-1.5">
+                <span v-if="sup.total_amount != null" class="text-[11px] font-medium text-gray-700">
+                  NT${{ Number(sup.total_amount).toLocaleString() }}
+                </span>
+                <span v-if="sup.expense_date" class="text-[10px] text-gray-400">
+                  {{ sup.expense_date }}
+                </span>
+                <span v-if="sup.invoice_number" class="text-[10px] font-mono text-gray-400 truncate">
+                  {{ sup.invoice_number }}
+                </span>
+              </div>
+
+              <!-- 備註 -->
+              <div class="mb-1.5 space-y-0.5">
+                <p v-if="sup.item_description" class="text-[10px] text-gray-500 truncate"
+                  :title="sup.item_description">{{ sup.item_description }}</p>
+                <p class="text-[10px] rounded px-1.5 py-1"
+                  :class="sup.user_description ? 'bg-amber-50 text-amber-700' : 'text-gray-300 italic'"
+                  :title="sup.user_description || ''">
+                  {{ sup.user_description || '無備註' }}
+                </p>
+              </div>
 
               <!-- 圖片縮圖：image_url（憑證）+ item_image_url（物品照）-->
               <div class="flex flex-wrap gap-1.5">

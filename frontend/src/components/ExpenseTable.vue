@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { useExpenseStore } from '../stores/expenseStore'
-import { getExpense, fetchExpenses, resolveDuplicate } from '../api/expenseApi'
+import { getExpense, fetchExpenses, fetchRelatedExpenses, resolveDuplicate } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
 import { Pencil, Trash2, Plus, ChevronsUpDown, ChevronRight, Link2, GripVertical } from 'lucide-vue-next'
 import ConfirmModal from './ConfirmModal.vue'
@@ -10,12 +10,23 @@ import BatchGroupModal from './BatchGroupModal.vue'
 const store = useExpenseStore()
 
 const BACKEND_BASE = 'http://localhost:8000'
+
+const CATEGORY_LABEL = {
+  INVOICE: '發票', RECEIPT: '收據', LABOR_SERVICE: '勞報',
+  TRANSPORTATION: '交通', CREDIT_NOTE: '退貨折讓',
+}
+
 function normalizeImageUrls(exp) {
   if (!exp) return exp
+  const raw = exp.voucher_categories
+  const parsed = raw
+    ? (typeof raw === 'string' ? JSON.parse(raw) : raw)
+    : null
   return {
     ...exp,
     image_url: (exp.image_url || []).map(u => u.startsWith('http') ? u : `${BACKEND_BASE}/${u}`),
     item_image_url: (exp.item_image_url || []).map(u => u.startsWith('http') ? u : `${BACKEND_BASE}/${u}`),
+    voucher_categories: parsed ? parsed.map(c => CATEGORY_LABEL[c] ?? c) : null,
   }
 }
 
@@ -43,12 +54,12 @@ async function toggleExpand(expense) {
     next.delete(id)
   } else {
     next.add(id)
-    // 有發票號碼的憑證（含 WAITING_RETURN 與已結清後變 PENDING）：尚未快取則抓取配對補件
-    if (expense.invoice_number && !(id in supplementCache.value)) {
+    // 抓取關聯補件（使用 parent_id 查詢，可靠不依賴 invoice_number）
+    if (!(id in supplementCache.value)) {
       supplementCache.value = { ...supplementCache.value, [id]: 'loading' }
       try {
-        const res = await fetchExpenses({ referenced_invoice_number: expense.invoice_number, page_size: 5 })
-        const items = res.data?.data?.items ?? []
+        const res = await fetchRelatedExpenses(id)
+        const items = res.data?.data ?? []
         const sup = items.find(e =>
           ['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE'].includes(e.relation_type)
         ) ?? null
@@ -580,7 +591,7 @@ function onDragEnd() {
 
             <!-- 待退貨補件子列：載入中 -->
             <tr
-              v-if="expandedRows.has(expense.id) && expense.status === 'WAITING_RETURN' && supplementCache[expense.id] === 'loading'"
+              v-if="expandedRows.has(expense.id) && supplementCache[expense.id] === 'loading'"
               class="border-b border-dashed border-purple-200"
             >
               <td colspan="15" class="bg-purple-50 px-6 py-2.5">
@@ -596,7 +607,7 @@ function onDragEnd() {
 
             <!-- 待退貨補件子列：錯誤 -->
             <tr
-              v-if="expandedRows.has(expense.id) && expense.status === 'WAITING_RETURN' && supplementCache[expense.id] === 'error'"
+              v-if="expandedRows.has(expense.id) && supplementCache[expense.id] === 'error'"
               class="border-b border-dashed border-purple-200"
             >
               <td colspan="15" class="bg-purple-50 px-6 py-2.5 text-xs text-red-400">無法載入補件資料</td>

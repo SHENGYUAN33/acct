@@ -173,6 +173,16 @@ def list_waiting_returns(
         ).order_by(Expense.created_at.desc())
     ).all())
 
+    # Step 2b：取所有已以 parent_id 明確配對的補件（不限原始憑證狀態，COMPLETED 除外）
+    all_paired_supplements: list[Expense] = list(db.scalars(
+        select(Expense).where(
+            Expense.relation_type.in_(["VOID_REPLACE", "CREDIT_NOTE", "RETURN_SUPPLEMENT"]),
+            Expense.parent_id.isnot(None),
+            Expense.status != ExpenseStatus.COMPLETED,
+            Expense.is_active == True,
+        ).order_by(Expense.created_at.desc())
+    ).all())
+
     # Step 3：以 invoice_number 建立可查找的 index
     invoice_by_number: dict[str, Expense] = {
         inv.invoice_number: inv
@@ -224,6 +234,22 @@ def list_waiting_returns(
                 else:
                     sup_data["suggested_match"] = None
                 orphan_supplements.append(sup_data)
+
+    # Step 5b：以 parent_id 明確配對的補件（pair_expense API 設定）
+    # 若原始憑證不是 WAITING_RETURN（手動加入情境），動態載入並加入左側
+    for sup in all_paired_supplements:
+        matched_invoice = invoice_by_id.get(sup.parent_id)
+        if not matched_invoice and sup.parent_id:
+            parent = db.get(Expense, sup.parent_id)
+            if parent and parent.is_active:
+                matched_invoice = parent
+                invoice_by_id[parent.id] = parent
+        if matched_invoice:
+            matched_invoice_ids.add(matched_invoice.id)
+            cases.append({
+                "invoice": ExpenseWithImages.model_validate(matched_invoice).model_dump(),
+                "supplement": ExpenseWithImages.model_validate(sup).model_dump(),
+            })
 
     # Step 6：左側原始憑證若尚無對應補件，單獨列出（supplement=null）
     for inv in all_left_invoices:
