@@ -1,7 +1,8 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useExpenseStore } from '../stores/expenseStore'
 import { fetchExpenseImages, updateExpenseImage } from '../api/expenseApi'
+import { getRosterList } from '../api/rosterApi'
 import { toast } from 'vue3-toastify'
 import {
   ImagePlus,
@@ -158,6 +159,32 @@ watch(
     }
   },
   { immediate: true }
+)
+
+// ── 員工名冊（費用提報者下拉來源）────────────────────────────────
+const rosterEmployees = ref([])
+
+async function loadRosterEmployees() {
+  try {
+    const res = await getRosterList({ page: 0, size: 1000 })
+    rosterEmployees.value = res.data?.data?.content ?? []
+  } catch {
+    rosterEmployees.value = []
+  }
+}
+
+onMounted(loadRosterEmployees)
+
+// 選擇費用提報者後自動帶入其組別
+watch(
+  () => form.value.submitter_name,
+  (name) => {
+    if (!name) return
+    const employee = rosterEmployees.value.find(e => e.name === name)
+    if (employee) {
+      form.value.submitter_dept = employee.department
+    }
+  }
 )
 
 // ── 選項清單 ────────────────────────────────────────────────────
@@ -577,11 +604,7 @@ function formatDateTime(val) {
                     class="w-full border border-gray-300 rounded px-3 py-2 text-sm text-gray-700 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
                   >
                     <option value="">-- 請選擇 --</option>
-                    <option value="Olivia">Olivia</option>
-                    <option value="Kevin">Kevin</option>
-                    <option value="Mary">Mary</option>
-                    <option value="Jason">Jason</option>
-                    <option value="Linda">Linda</option>
+                    <option v-for="emp in rosterEmployees" :key="emp.id" :value="emp.name">{{ emp.name }}</option>
                   </select>
                 </div>
 

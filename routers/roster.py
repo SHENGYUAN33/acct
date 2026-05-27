@@ -30,7 +30,7 @@ router = APIRouter(
 def list_roster(
     is_bound: bool | None = Query(default=None, description="過濾綁定狀態：true=已綁定，false=未綁定，省略=全部"),
     page: int = Query(default=0, ge=0, description="頁碼（從 0 開始）"),
-    size: int = Query(default=20, ge=1, le=200, description="每頁筆數"),
+    size: int = Query(default=20, ge=1, le=1000, description="每頁筆數"),
     db: Session = Depends(get_db),
 ) -> dict:
     """查詢員工名冊清單，支援 is_bound 過濾與分頁。"""
