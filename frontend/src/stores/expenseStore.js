@@ -78,8 +78,9 @@ export const useExpenseStore = defineStore('expense', () => {
   const filters = ref({
     checkStatus: '',
     dept: '',
-    category: '',
-    subItem: '',
+    category: '',   // 憑證類別中文標籤（client-side）
+    status: '',     // 審核狀態（server-side）
+    q: '',          // 搜尋關鍵字：案件編號/上傳者（server-side）
     dateFrom: '',
     dateTo: '',
     submitter: '',
@@ -108,12 +109,14 @@ export const useExpenseStore = defineStore('expense', () => {
   // ── Getters ──────────────────────────────────────────────────
   const filteredExpenses = computed(() => {
     return expenses.value.filter((e) => {
-      // 勾選狀態篩選
+      // 勾選狀態篩選（client-side）
       if (filters.value.checkStatus === 'checked' && !checkedIds.value.has(e.id)) return false
       if (filters.value.checkStatus === 'unchecked' && checkedIds.value.has(e.id)) return false
-      // 組別篩選
+      // 組別篩選（client-side）
       if (filters.value.dept && e.uploader_dept !== filters.value.dept) return false
-      // 費用提報者篩選
+      // 憑證類別篩選（client-side，比對 mapExpense 轉譯後的中文標籤陣列）
+      if (filters.value.category && !e.voucher_categories?.includes(filters.value.category)) return false
+      // 費用提報者篩選（client-side fallback）
       if (
         filters.value.submitter &&
         !e.submitter_name?.includes(filters.value.submitter) &&
@@ -143,7 +146,7 @@ export const useExpenseStore = defineStore('expense', () => {
     const pending = expenses.value.filter((e) => e.status === 'PENDING' || e.status === 'NEEDS_MANUAL_REVIEW')
     return {
       dateRange: `${filters.value.dateFrom || '-'} ~ ${filters.value.dateTo || '-'}`,
-      hasPending: pending.length > 0,
+      hasPendingReview: pending.length > 0,
       totalUploaders: new Set(expenses.value.map((e) => e.uploader_name).filter(Boolean)).size,
       totalExpenses: expenses.value.length,
       totalImages: expenses.value.filter((e) => e.image_url && e.image_url.length > 0).length,
@@ -155,6 +158,28 @@ export const useExpenseStore = defineStore('expense', () => {
   function setFilter(key, value) {
     filters.value[key] = value
     currentPage.value = 1
+  }
+
+  // server-side 篩選條件變更時，重置頁碼並重新拉取資料
+  async function setFilterAndFetch(key, value) {
+    filters.value[key] = value
+    currentPage.value = 1
+    await fetchExpenses()
+  }
+
+  function resetFilters() {
+    filters.value = {
+      checkStatus: '',
+      dept: '',
+      category: '',
+      status: '',
+      q: '',
+      dateFrom: '',
+      dateTo: '',
+      submitter: '',
+    }
+    currentPage.value = 1
+    fetchExpenses()
   }
 
   // 切換單筆勾選（重新 assign 觸發 reactivity）
@@ -213,6 +238,12 @@ export const useExpenseStore = defineStore('expense', () => {
         page: currentPage.value,
         page_size: pageSize.value,
         ...(hasDuplicateFilter.value ? { has_duplicate: true } : {}),
+        ...(filters.value.status ? { status: filters.value.status } : {}),
+        // 已作廢單據後端預設排除（is_active=False），需明確帶 include_inactive
+        ...(filters.value.status === 'REPLACED_VOID' ? { include_inactive: true } : {}),
+        ...(filters.value.dateFrom ? { date_from: filters.value.dateFrom } : {}),
+        ...(filters.value.dateTo ? { date_to: filters.value.dateTo } : {}),
+        ...(filters.value.q ? { q: filters.value.q } : {}),
         ...extraParams,
       }
       const res = await apiFetchExpenses(params)
@@ -421,6 +452,8 @@ export const useExpenseStore = defineStore('expense', () => {
     allChecked,
     hasDuplicateFilter,
     setFilter,
+    setFilterAndFetch,
+    resetFilters,
     setPage,
     setPageSize,
     toggleCheck,
