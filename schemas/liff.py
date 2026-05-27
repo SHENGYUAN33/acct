@@ -119,8 +119,7 @@ class SubmitSessionRequest(BaseModel):
     )
     wr_original_invoice: str | None = Field(
         default=None,
-        pattern=r'^[A-Z]{2}-?\d{8}$',
-        description="情境A：被替換的原始發票號碼（格式 AB-12345678）",
+        description="情境A：被替換的原始發票號碼",
     )
     wr_original_date: str | None = Field(
         default=None,

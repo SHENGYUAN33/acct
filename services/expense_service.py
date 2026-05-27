@@ -544,7 +544,6 @@ def _pick_primary_fields(ocr_results: list[VoucherOCRResult]) -> dict:
 
     # ── LABOR_SERVICE ──────────────────────────────────────
     elif cat == "LABOR_SERVICE":
-        kwargs["submitter_name"] = primary.payee_name
         kwargs["item_description"] = primary.labor_content
 
     # ── INSURANCE ──────────────────────────────────────────

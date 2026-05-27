@@ -281,42 +281,24 @@
       <textarea class="note-textarea" id="note-input" rows="3" placeholder="輸入備注"></textarea>
     </div>
 
-    <!-- 退貨補件標記（enable_waiting_return_liff_button=true 時顯示） -->
+    <!-- 退換貨處理（enable_waiting_return_liff_button=true 時顯示） -->
     <div id="waiting-return-section" style="display:none; margin-top:16px; background:#faf5ff; border:1px solid #d8b4fe; border-radius:12px; padding:16px;">
       <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:14px; font-weight:600; color:#7e22ce;">
         <input type="checkbox" id="is-return-supplement" style="width:18px; height:18px; accent-color:#7c3aed;" />
-        此為退貨補件
+        退換貨處理
       </label>
       <div id="waiting-return-input-wrap" style="display:none; margin-top:12px;">
-        <label style="font-size:13px; color:#6b7280; display:block; margin-bottom:6px;">舊憑證號碼（選填，格式：AB-12345678）</label>
+        <label style="font-size:13px; color:#6b7280; display:block; margin-bottom:6px;">舊憑證號碼（選填）</label>
         <input
           type="text"
           id="wr-original-invoice"
-          placeholder="AB-12345678"
-          maxlength="11"
+          placeholder="例：AB-12345678"
+          oninput="this.value = this.value.toUpperCase()"
           style="width:100%; box-sizing:border-box; border:1px solid #c4b5fd; border-radius:8px; padding:10px 12px; font-size:14px; font-family:monospace; outline:none;"
         />
-        <p style="font-size:12px; color:#9ca3af; margin-top:8px; margin-bottom:8px;">若無號碼，填舊收據的日期與金額：</p>
-        <div style="display:flex; gap:10px;">
-          <div style="flex:1;">
-            <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px;">日期</label>
-            <input
-              type="date"
-              id="wr-original-date"
-              style="width:100%; box-sizing:border-box; border:1px solid #c4b5fd; border-radius:8px; padding:9px 10px; font-size:13px; outline:none;"
-            />
-          </div>
-          <div style="flex:1;">
-            <label style="font-size:12px; color:#6b7280; display:block; margin-bottom:4px;">金額</label>
-            <input
-              type="number"
-              id="wr-original-amount"
-              placeholder="0"
-              min="0"
-              style="width:100%; box-sizing:border-box; border:1px solid #c4b5fd; border-radius:8px; padding:9px 10px; font-size:13px; outline:none;"
-            />
-          </div>
-        </div>
+        <p style="font-size:12px; color:#9ca3af; margin-top:8px; line-height:1.6;">
+          若有折讓單請一起上傳。<br>其他說明可填入上方備注欄。
+        </p>
       </div>
     </div>
 
@@ -441,7 +423,10 @@ async function apiPost(path, body) {
   })
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({ detail: res.statusText }))
-    const err = new Error(errBody.detail || `HTTP ${res.status}`)
+    const detail = Array.isArray(errBody.detail)
+      ? errBody.detail.map(e => e.msg || JSON.stringify(e)).join('; ')
+      : (errBody.detail || `HTTP ${res.status}`)
+    const err = new Error(detail)
     err.status = res.status
     throw err
   }
@@ -587,6 +572,7 @@ function onPointerUp() {
 // ════════════════════════════════
 async function startUpload() {
   if (!photos.length || isUploading) return
+
   isUploading = true
   btnUpload.disabled = true
 
@@ -650,12 +636,9 @@ async function startUpload() {
   bar.style.width = '90%'
   msgEl.textContent = '送出中...'
 
-  const noteText             = document.getElementById('note-input').value.trim()
-  const isReturnSupplement   = document.getElementById('is-return-supplement')?.checked ?? false
-  const wrOriginalInvoice    = (document.getElementById('wr-original-invoice')?.value ?? '').trim() || null
-  const wrOriginalDate       = (document.getElementById('wr-original-date')?.value ?? '').trim() || null
-  const wrAmountRaw          = document.getElementById('wr-original-amount')?.value
-  const wrOriginalAmount     = wrAmountRaw ? parseFloat(wrAmountRaw) : null
+  const noteText           = document.getElementById('note-input').value.trim()
+  const isReturnSupplement = document.getElementById('is-return-supplement')?.checked ?? false
+  const wrOriginalInvoice  = (document.getElementById('wr-original-invoice')?.value ?? '').trim().toUpperCase() || null
 
   try {
     await apiPost(`/liff/sessions/${sessionId}/submit`, {
@@ -663,8 +646,6 @@ async function startUpload() {
       ...(isReturnSupplement ? {
         is_return_supplement: true,
         ...(wrOriginalInvoice ? { wr_original_invoice: wrOriginalInvoice } : {}),
-        ...(wrOriginalDate    ? { wr_original_date: wrOriginalDate }       : {}),
-        ...(wrOriginalAmount !== null ? { wr_original_amount: wrOriginalAmount } : {}),
       } : {})
     })
     bar.style.width = '100%'
@@ -715,10 +696,6 @@ async function resetAll() {
   if (wrCheckbox) wrCheckbox.checked = false
   const wrInvoice = document.getElementById('wr-original-invoice')
   if (wrInvoice) wrInvoice.value = ''
-  const wrDate = document.getElementById('wr-original-date')
-  if (wrDate) wrDate.value = ''
-  const wrAmount = document.getElementById('wr-original-amount')
-  if (wrAmount) wrAmount.value = ''
   const wrInputWrap = document.getElementById('waiting-return-input-wrap')
   if (wrInputWrap) wrInputWrap.style.display = 'none'
 

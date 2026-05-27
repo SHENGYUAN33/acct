@@ -573,7 +573,10 @@ async function apiPost(path, body) {
   })
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({ detail: res.statusText }))
-    const err = new Error(errBody.detail || `HTTP ${res.status}`)
+    const detail = Array.isArray(errBody.detail)
+      ? errBody.detail.map(e => e.msg || JSON.stringify(e)).join('; ')
+      : (errBody.detail || `HTTP ${res.status}`)
+    const err = new Error(detail)
     err.status = res.status
     throw err
   }

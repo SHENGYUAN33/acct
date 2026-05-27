@@ -131,7 +131,7 @@ def push_reject_notification(
             f"憑證類別：{categories_display}\n"
             f"發票號碼：{invoice_number or '無'}\n"
             f"發票金額：{total_amount or '無'}\n\n"
-            "此發票已退回"
+            "此筆報帳已退回"
         )
         req = PushMessageRequest(
             to=line_user_id,
