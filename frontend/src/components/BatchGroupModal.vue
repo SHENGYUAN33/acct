@@ -3,13 +3,14 @@ import { ref, computed, onMounted } from 'vue'
 import { X, Loader2, ImageOff } from 'lucide-vue-next'
 import { fetchBatchExpenses } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
+import { API_BASE_URL } from '../utils/axios'
 
 const props = defineProps({
   expenseId: { type: String, required: true },
 })
 const emit = defineEmits(['close'])
 
-const BACKEND_BASE = 'http://localhost:8000'
+const BACKEND_BASE = API_BASE_URL
 
 const isLoading = ref(true)
 const batchExpenses = ref([])

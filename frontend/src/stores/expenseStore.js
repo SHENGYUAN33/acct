@@ -13,8 +13,10 @@ import {
   reorderExpenses as apiReorderExpenses,
 } from '../api/expenseApi'
 
+import { API_BASE_URL } from '../utils/axios'
+
 // 後端 image_url 格式為 "uploads/xxx.jpg"，需拼接 baseURL 才能顯示
-const BACKEND_BASE_URL = 'http://localhost:8000'
+const BACKEND_BASE_URL = API_BASE_URL
 
 // 憑證類別代碼對應中文名稱
 const CATEGORY_LABEL = {

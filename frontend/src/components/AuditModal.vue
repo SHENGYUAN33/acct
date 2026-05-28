@@ -15,11 +15,12 @@ import {
   RefreshCw,
   ScanLine,
 } from 'lucide-vue-next'
+import { API_BASE_URL } from '../utils/axios'
 
 const store = useExpenseStore()
 
 // 後端 Base URL（供子圖片拼接完整路徑）
-const BACKEND_BASE_URL = 'http://localhost:8000'
+const BACKEND_BASE_URL = API_BASE_URL
 
 // 憑證類別代碼對應中文名稱
 const CATEGORY_LABEL = {
@@ -173,7 +174,9 @@ async function loadRosterEmployees() {
   }
 }
 
-onMounted(loadRosterEmployees)
+onMounted(() => {
+  if (localStorage.getItem('acctassist_token')) loadRosterEmployees()
+})
 
 // 選擇費用提報者後自動帶入其組別
 watch(

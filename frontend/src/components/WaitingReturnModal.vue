@@ -3,10 +3,11 @@ import { ref, computed, onMounted } from 'vue'
 import { X, Loader2, PackageX, CheckCircle2, ChevronRight, ChevronDown, Search, Link2, Unlink2, Trash2 } from 'lucide-vue-next'
 import { fetchWaitingReturns, fetchExpenses, updateExpense, deleteExpense, pairExpense } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
+import { API_BASE_URL } from '../utils/axios'
 
 const emit = defineEmits(['close', 'count-changed'])
 
-const BACKEND_BASE = 'http://localhost:8000'
+const BACKEND_BASE = API_BASE_URL
 
 // ── 資料 ───────────────────────────────────────────────────────────
 const isLoading = ref(true)

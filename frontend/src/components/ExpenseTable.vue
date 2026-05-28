@@ -3,13 +3,14 @@ import { ref, computed, watch } from 'vue'
 import { useExpenseStore } from '../stores/expenseStore'
 import { getExpense, fetchExpenses, fetchRelatedExpenses, resolveDuplicate } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
+import { API_BASE_URL } from '../utils/axios'
 import { Pencil, Trash2, Plus, ChevronsUpDown, ChevronRight, Link2, GripVertical } from 'lucide-vue-next'
 import ConfirmModal from './ConfirmModal.vue'
 import BatchGroupModal from './BatchGroupModal.vue'
 
 const store = useExpenseStore()
 
-const BACKEND_BASE = 'http://localhost:8000'
+const BACKEND_BASE = API_BASE_URL
 
 const CATEGORY_LABEL = {
   INVOICE: '發票', RECEIPT: '收據', LABOR_SERVICE: '勞報',

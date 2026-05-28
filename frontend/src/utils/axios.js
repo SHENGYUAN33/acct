@@ -1,8 +1,10 @@
 import axios from 'axios'
 
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+
 // ── Axios 實例設定 ────────────────────────────────────────────────
 const apiClient = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: API_BASE_URL,
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
@@ -43,13 +45,15 @@ apiClient.interceptors.response.use(
       // 401 → 清除 token 並跳轉登入頁
       if (status === 401) {
         localStorage.removeItem('acctassist_token')
-        window.location.href = '/login'
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login'
+        }
         return Promise.reject(error)
       }
       console.error(`[API HTTP ${status}]`, data?.detail || data?.message || error.message)
     } else if (error.request) {
       // 請求送出但沒有收到回應（後端未啟動或 CORS 問題）
-      console.error('[API No Response] 後端可能未啟動，請確認 http://localhost:8000 是否運行中')
+      console.error(`[API No Response] 後端可能未啟動，請確認 ${API_BASE_URL} 是否運行中`)
     } else {
       console.error('[API Setup Error]', error.message)
     }
