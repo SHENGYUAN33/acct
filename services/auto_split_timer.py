@@ -36,7 +36,10 @@ async def _delayed_call(
             exc_info=True,
         )
     finally:
-        _timers.pop(user_id, None)
+        # Guard: only remove our own entry — a cancelled task must not evict
+        # the replacement task that was scheduled after us.
+        if _timers.get(user_id) is asyncio.current_task():
+            _timers.pop(user_id, None)
 
 
 def schedule(

@@ -439,6 +439,7 @@ class TestOnboardingFlow:
             patch("services.line_service.reply_text", MagicMock()),
             patch("services.line_service.push_text", MagicMock()),
             patch("core.config.settings.enable_user_binding", False),
+            patch("core.config.settings.enable_roster_binding", False),
         ):
             payload = _make_text_event(line_user_id, "你好")
             mock_parser.parse.return_value = _build_parsed_events(payload)
@@ -487,6 +488,10 @@ class TestOnboardingFlow:
 class TestEmptyBatchProtection:
     """pending_images=[] 時按確認送出 → reply 提示，不建立 Expense。"""
 
+    @pytest.mark.skip(
+        reason="PostbackEvent confirm_submit handling removed from webhook; moved to LIFF API. "
+               "Webhook now only processes MessageEvent and FollowEvent."
+    )
     def test_empty_batch_submit_returns_prompt(self, integration_db: Session) -> None:
         line_user_id = f"U_empty_{uuid.uuid4().hex[:8]}"
         _insert_user(integration_db, line_user_id, department="攝影組")
@@ -523,6 +528,9 @@ class TestEmptyBatchProtection:
         # background task 不應被加入
         mock_add_task.assert_not_called()
 
+    @pytest.mark.skip(
+        reason="PostbackEvent confirm_submit handling removed from webhook; moved to LIFF API."
+    )
     def test_no_state_means_empty_batch(self, integration_db: Session) -> None:
         """User 有部門但沒有 UserState → pending_images 視為空，應回覆提示。"""
         line_user_id = f"U_nostate_{uuid.uuid4().hex[:8]}"
@@ -554,6 +562,9 @@ class TestEmptyBatchProtection:
 class TestBatchSubmitFlow:
     """有 pending_images 時按確認送出 → 立即 reply「處理中」+ background task 被加入。"""
 
+    @pytest.mark.skip(
+        reason="PostbackEvent confirm_submit handling removed from webhook; moved to LIFF API."
+    )
     def test_confirm_submit_with_images_triggers_background(
         self, integration_db: Session
     ) -> None:
@@ -666,6 +677,10 @@ class TestStickerProtection:
     """傳送貼圖 → push 提示，pending_images 不應改變。"""
 
     def test_sticker_triggers_push_prompt(self, integration_db: Session) -> None:
+        """
+        貼圖訊息：webhook 不再推播提示（功能已移至 LIFF 流程）。
+        只驗證：200 回應、系統不崩潰、pending_images 不受影響。
+        """
         line_user_id = f"U_stk_{uuid.uuid4().hex[:8]}"
         _insert_user(integration_db, line_user_id, department="製片組")
 
@@ -684,10 +699,8 @@ class TestStickerProtection:
 
         assert response.status_code == 200
 
-        # 應 push 提示
-        mock_push_text.assert_called()
-        push_content = " ".join(str(c) for c in mock_push_text.call_args_list)
-        assert "照片" in push_content or "僅支援" in push_content
+        # 非文字訊息在新版 webhook 中被靜默略過（不推播）
+        mock_push_text.assert_not_called()
 
         # pending_images 不應有任何資料
         row = integration_db.execute(

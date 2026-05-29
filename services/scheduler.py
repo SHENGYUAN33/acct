@@ -89,6 +89,13 @@ def start_scheduler(
         logger.info("scheduler: 排程已停用（enable_scheduled_batch=false），跳過啟動")
         return
 
+    if not isinstance(_timezone, str):
+        logger.warning(
+            "scheduler: 時區型別無效（%s），跳過啟動（測試環境 settings mock 未設定 scheduled_batch_timezone？）",
+            type(_timezone).__name__,
+        )
+        return
+
     if not _times:
         logger.warning("scheduler: 時間清單為空，跳過排程器啟動")
         return

@@ -238,15 +238,19 @@ def _make_image_event(line_user_id: str, message_id: str = "img_msg_001", timest
     """建立 ImageMessageContent event mock。"""
     from linebot.v3.webhooks import ImageMessageContent, MessageEvent
 
-    event = MagicMock(spec=MessageEvent)
-    event.__class__ = MessageEvent
-    event.source.user_id = line_user_id
-    event.reply_token = "reply_tok_img"
-    event.timestamp = timestamp
+    source = MagicMock()
+    source.user_id = line_user_id
 
     msg = MagicMock(spec=ImageMessageContent)
     msg.__class__ = ImageMessageContent
     msg.id = message_id
+
+    # spec=MessageEvent 已令 isinstance(event, MessageEvent) 為 True；
+    # 勿再設 event.__class__ = MessageEvent，否則屬性存取會走 Pydantic 路徑而非 MagicMock。
+    event = MagicMock(spec=MessageEvent)
+    event.source = source
+    event.reply_token = "reply_tok_img"
+    event.timestamp = timestamp
     event.message = msg
     return event
 
@@ -256,6 +260,10 @@ def _make_image_event(line_user_id: str, message_id: str = "img_msg_001", timest
 # ---------------------------------------------------------------------------
 
 class TestConfirmSubmitCancelsTimer:
+    @pytest.mark.skip(
+        reason="PostbackEvent handling removed from webhook; confirm_submit moved to LIFF. "
+               "Timer cancellation should be tested in liff_service tests."
+    )
     def test_confirm_submit_cancels_existing_timer(self, auto_split_db):
         """confirm_submit 時若有活躍 Timer → cancel() 被呼叫（Priority Event 保證）"""
         from services import auto_split_timer
@@ -272,6 +280,9 @@ class TestConfirmSubmitCancelsTimer:
                 mock_settings.enable_auto_split = True
                 mock_settings.auto_split_debounce_seconds = 60
                 mock_settings.enable_user_binding = False
+                mock_settings.enable_scheduled_batch = False
+                mock_settings.scheduled_batch_timezone = "Asia/Taipei"
+                mock_settings.scheduled_batch_times = ["20:00"]
                 mock_settings.line_channel_secret = "test-channel-secret"
                 mock_settings.storage_path = "./uploads"
 
@@ -295,7 +306,11 @@ class TestConfirmSubmitCancelsTimer:
         with patch.object(auto_split_timer, "cancel") as mock_cancel:
             with patch("core.config.settings") as mock_settings:
                 mock_settings.enable_auto_split = False
+                mock_settings.auto_split_debounce_seconds = 60
                 mock_settings.enable_user_binding = False
+                mock_settings.enable_scheduled_batch = False
+                mock_settings.scheduled_batch_timezone = "Asia/Taipei"
+                mock_settings.scheduled_batch_times = ["20:00"]
                 mock_settings.line_channel_secret = "test-channel-secret"
                 mock_settings.storage_path = "./uploads"
 
@@ -368,7 +383,7 @@ class TestTriggerByField:
             patch("services.expense_service.create_batch_expense", side_effect=_fake_create_batch),
             patch("services.relation_service.attach_orphan_images_to_recent_expense",
                   return_value=None),
-            patch("core.database.SessionLocal", return_value=auto_split_db),
+            patch("services.auto_split_service.SessionLocal", return_value=auto_split_db),
         ):
             from services.auto_split_service import auto_split_process
             asyncio.run(
@@ -417,7 +432,7 @@ class TestAutoSplitMultipleExpenses:
             patch("services.expense_service.create_batch_expense", side_effect=_mock_create),
             patch("services.relation_service.attach_orphan_images_to_recent_expense",
                   return_value=None),
-            patch("core.database.SessionLocal", return_value=auto_split_db),
+            patch("services.auto_split_service.SessionLocal", return_value=auto_split_db),
         ):
             from services.auto_split_service import auto_split_process
             asyncio.run(
@@ -460,7 +475,7 @@ class TestAutoSplitMultipleExpenses:
             patch("services.expense_service.create_batch_expense", return_value=MagicMock(serial_number="EXP-X")),
             patch("services.relation_service.attach_orphan_images_to_recent_expense",
                   return_value=None),
-            patch("core.database.SessionLocal", return_value=auto_split_db),
+            patch("services.auto_split_service.SessionLocal", return_value=auto_split_db),
         ):
             from services.auto_split_service import auto_split_process
             asyncio.run(
