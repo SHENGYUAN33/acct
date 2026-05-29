@@ -1,0 +1,59 @@
+# Secrets — never bake into image
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# Uploaded invoice images — handled by Volume mount
+uploads/
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Frontend build artifacts and dependencies
+frontend/node_modules/
+frontend/dist/
+node_modules/
+
+# Tests
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE / OS
+.vscode/
+.idea/
+.claude/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# CI/CD and deployment configs (not needed inside image)
+.github/
+customer-deploy/
+nginx/
+scripts/
+
+# GCP service account key
+sa-key.json
+
+# Logs
+*.log

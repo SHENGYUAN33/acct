@@ -1,0 +1,53 @@
+version: "3.9"
+
+# AcctAssist 客戶攜帶式部署
+# 在客戶電腦上執行：docker compose up -d --build
+# 需先執行 setup.ps1（Windows）或 setup.sh（Mac/Linux）完成設定
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: acctassist_db
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-acctassist}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: acctassist_backend
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "alembic upgrade head &&
+             uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1"
+    expose:
+      - "8000"
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: acctassist_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../frontend/dist:/usr/share/nginx/html:ro
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  uploads_data:

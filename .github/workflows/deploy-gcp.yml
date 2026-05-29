@@ -1,0 +1,220 @@
+name: Deploy to GCP
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GCP_REGION: asia-east1
+  GCP_ZONE: asia-east1-b
+  AR_REPO: acctassist
+  IMAGE_NAME: backend
+  VM_NAME: acctassist-vm
+  VM_USER: ubuntu
+
+jobs:
+  # ── Job 1: 單元測試 ────────────────────────────────────────────────
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pytest
+        run: pytest tests/ --tb=short -q
+        env:
+          DATABASE_URL: sqlite:///file::memory:?cache=shared&uri=true
+          LINE_CHANNEL_SECRET: test-secret-32chars-placeholder00
+          LINE_CHANNEL_ACCESS_TOKEN: test-token
+          GEMINI_API_KEY: test-key
+          JWT_SECRET: test-jwt-secret-for-ci-only-not-production
+          APP_ENV: development
+
+  # ── Job 2: 建置後端 Docker image 並推送 Artifact Registry ──────────
+  build-backend:
+    name: Build & Push Backend Image
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Compute image tag
+        id: meta
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
+          IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}"
+          echo "image_tag=${IMAGE}:${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "image_latest=${IMAGE}:latest" >> $GITHUB_OUTPUT
+          echo "Built image tag: ${IMAGE}:${SHORT_SHA}"
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --tag "${{ steps.meta.outputs.image_tag }}" \
+            --tag "${{ steps.meta.outputs.image_latest }}" \
+            --file Dockerfile \
+            .
+
+      - name: Push to Artifact Registry
+        run: |
+          docker push "${{ steps.meta.outputs.image_tag }}"
+          docker push "${{ steps.meta.outputs.image_latest }}"
+
+  # ── Job 3: 建置前端 Vue SPA ──────────────────────────────────────
+  build-frontend:
+    name: Build Frontend
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Write root .env for Vite build
+        # vite.config.js uses envDir: '../' (reads from project root)
+        # Write .env to project root so Vite picks up VITE_* vars
+        run: |
+          cat > .env << 'EOF'
+          VITE_API_BASE_URL=${{ secrets.VITE_API_BASE_URL }}
+          VITE_ENABLE_PROCESS_PENDING=false
+          VITE_ENABLE_SCHEDULER_CONFIG=true
+          VITE_ENABLE_DUPLICATE_DETECTION=true
+          EOF
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build Vue SPA
+        working-directory: frontend
+        run: npm run build
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 1
+
+  # ── Job 4: 部署到 GCP VM ──────────────────────────────────────────
+  deploy:
+    name: Deploy to GCP VM
+    needs: [build-backend, build-frontend]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download frontend dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Copy deployment configs to VM
+        run: |
+          gcloud compute scp docker-compose.prod.yml \
+            ${{ env.VM_USER }}@${{ env.VM_NAME }}:/opt/acctassist/docker-compose.prod.yml \
+            --zone=${{ env.GCP_ZONE }} --quiet
+
+          gcloud compute scp nginx/nginx.conf \
+            ${{ env.VM_USER }}@${{ env.VM_NAME }}:/opt/acctassist/nginx.conf \
+            --zone=${{ env.GCP_ZONE }} --quiet
+
+      - name: Sync Vue SPA to VM
+        run: |
+          gcloud compute scp --recurse frontend/dist/ \
+            ${{ env.VM_USER }}@${{ env.VM_NAME }}:/var/www/acctassist \
+            --zone=${{ env.GCP_ZONE }} --quiet
+
+      - name: Deploy and health check on VM
+        run: |
+          gcloud compute ssh ${{ env.VM_USER }}@${{ env.VM_NAME }} \
+            --zone=${{ env.GCP_ZONE }} \
+            --command="
+              set -e
+              cd /opt/acctassist
+
+              echo '--- 拉取 production secret ---'
+              gcloud secrets versions access latest \
+                --secret=acctassist-env-production \
+                --project=${{ secrets.GCP_PROJECT_ID }} > .env.production
+              chmod 600 .env.production
+
+              echo '--- 注入 image tag ---'
+              echo 'BACKEND_IMAGE=${{ needs.build-backend.outputs.image_tag }}' >> .env.production
+
+              echo '--- 拉取新 image ---'
+              BACKEND_IMAGE='${{ needs.build-backend.outputs.image_tag }}' \
+                docker compose -f docker-compose.prod.yml pull backend
+
+              echo '--- Rolling restart（不重啟 db）---'
+              BACKEND_IMAGE='${{ needs.build-backend.outputs.image_tag }}' \
+                docker compose -f docker-compose.prod.yml up -d --no-deps backend
+
+              echo '--- 更新 Nginx config ---'
+              sudo cp /opt/acctassist/nginx.conf /etc/nginx/sites-available/acctassist
+              sudo nginx -t && sudo systemctl reload nginx
+
+              echo '--- Health check (最多 50 秒) ---'
+              for i in \$(seq 1 10); do
+                STATUS=\$(curl -sf http://localhost:8000/health \
+                  | python3 -c 'import sys,json; print(json.load(sys.stdin)[\"status\"])' 2>/dev/null \
+                  || echo 'error')
+                if [ \"\$STATUS\" = 'success' ]; then
+                  echo \"[OK] Health check passed (attempt \$i)\"
+                  exit 0
+                fi
+                echo \"[..] Attempt \$i/10 — waiting 5s\"
+                sleep 5
+              done
+              echo '[ERROR] Health check failed after 10 attempts'
+              docker compose -f docker-compose.prod.yml logs backend --tail 30
+              exit 1
+            "
+
+      - name: Deployment summary
+        run: |
+          echo "## Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend Image | \`${{ needs.build-backend.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | Synced to /var/www/acctassist |" >> $GITHUB_STEP_SUMMARY

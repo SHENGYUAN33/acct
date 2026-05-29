@@ -1,6 +1,12 @@
-# Environment
+# Environment — 不得 commit 任何含真實金鑰的 .env 檔
 .env
-.env.local
+.env.*
+!.env.example
+!.env.production.example
+customer-deploy/.env
+
+# GCP Service Account Key — 絕對不能 commit
+sa-key.json
 
 # Python
 __pycache__/
