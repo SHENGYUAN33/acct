@@ -226,6 +226,10 @@ async function markCompleted(caseItem) {
   if (completingId.value === key) return
   completingId.value = key
   try {
+    // 若補件僅以 referenced_invoice_number 配對（parent_id 尚未設定），補呼叫 pair API
+    if (!caseItem.supplement.parent_id) {
+      await pairExpense(caseItem.supplement.id, caseItem.invoice.id)
+    }
     await Promise.all([
       updateExpense(caseItem.supplement.id, { status: 'COMPLETED' }),
       updateExpense(caseItem.invoice.id, { status: 'PENDING' }),
@@ -259,16 +263,29 @@ async function deleteOrphanSupplement(sup) {
 }
 
 // ── 解除配對 ───────────────────────────────────────────────────────
-async function unlinkSupplement(supplement) {
+async function unlinkSupplement(supplement, invoice) {
   if (unlinkingId.value === supplement.id) return
   unlinkingId.value = supplement.id
   try {
-    await updateExpense(supplement.id, {
-      referenced_invoice_number: null,
-      parent_id: null,
-    })
+    const wasCompleted = supplement.status === 'COMPLETED'
+    const ops = [
+      updateExpense(supplement.id, {
+        parent_id: null,
+        referenced_invoice_number: null,
+        ...(wasCompleted ? { status: 'PENDING' } : {}),
+      }),
+    ]
+    // markCompleted 時將原始憑證改為 PENDING，解除時還原為 WAITING_RETURN
+    if (wasCompleted && invoice) {
+      ops.push(updateExpense(invoice.id, { status: 'WAITING_RETURN' }))
+    }
+    await Promise.all(ops)
     toast.success(`補件 ${supplement.serial_number} 已解除配對`)
     await loadData()
+    // 手動加入的原始憑證（非 WAITING_RETURN）不在後端查詢範圍內，loadData 後補回左側
+    if (invoice && !cases.value.some(c => c.invoice.id === invoice.id)) {
+      cases.value = [{ invoice, supplement: null }, ...cases.value]
+    }
     emit('count-changed')
   } catch {
     toast.error('解除配對失敗')
@@ -461,9 +478,10 @@ async function unlinkSupplement(supplement) {
                     </div>
                   </div>
 
-                  <!-- 動作按鈕（已結清不顯示） -->
-                  <div v-if="item.supplement.status !== 'COMPLETED'" class="flex gap-2 pt-1">
+                  <!-- 動作按鈕 -->
+                  <div class="flex gap-2 pt-1">
                     <button
+                      v-if="item.supplement.status !== 'COMPLETED'"
                       @click.stop="markCompleted(item)"
                       :disabled="completingId === item.supplement.id"
                       class="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
@@ -474,7 +492,7 @@ async function unlinkSupplement(supplement) {
                       {{ completingId === item.supplement.id ? '處理中...' : '確認配對完成' }}
                     </button>
                     <button
-                      @click.stop="unlinkSupplement(item.supplement)"
+                      @click.stop="unlinkSupplement(item.supplement, item.invoice)"
                       :disabled="unlinkingId === item.supplement.id"
                       class="flex items-center gap-1 px-3 py-1.5 border border-gray-300 hover:border-red-300 hover:text-red-500 text-gray-500 text-xs rounded-lg transition-colors disabled:opacity-50"
                       title="解除配對，補件移回孤立補件區"

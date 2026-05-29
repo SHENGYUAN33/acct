@@ -1,10 +1,10 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { useExpenseStore } from '../stores/expenseStore'
-import { getExpense, fetchExpenses, fetchRelatedExpenses, resolveDuplicate } from '../api/expenseApi'
+import { getExpense, fetchExpenses, fetchRelatedExpenses, resolveDuplicate, updateExpense as apiUpdateExpense } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
 import { API_BASE_URL } from '../utils/axios'
-import { Pencil, Trash2, Plus, ChevronsUpDown, ChevronRight, Link2, GripVertical } from 'lucide-vue-next'
+import { Pencil, Trash2, Plus, ChevronsUpDown, ChevronRight, Link2, GripVertical, Unlink2 } from 'lucide-vue-next'
 import ConfirmModal from './ConfirmModal.vue'
 import BatchGroupModal from './BatchGroupModal.vue'
 
@@ -194,6 +194,36 @@ async function onDrop(e, expense) {
 function onDragEnd() {
   draggedId.value = null
   dragOverId.value = null
+}
+
+// ── 補件解除配對 ──────────────────────────────────────────────────
+const unlinkingSupplementId = ref(null)
+
+async function handleUnlinkSupplement(parentExpense) {
+  const sup = supplementCache.value[parentExpense.id]
+  if (!sup || unlinkingSupplementId.value === sup.id) return
+  unlinkingSupplementId.value = sup.id
+  try {
+    const wasCompleted = sup.status === 'COMPLETED'
+    const ops = [
+      apiUpdateExpense(sup.id, {
+        parent_id: null,
+        referenced_invoice_number: null,
+        ...(wasCompleted ? { status: 'PENDING' } : {}),
+      }),
+    ]
+    if (wasCompleted) {
+      ops.push(apiUpdateExpense(parentExpense.id, { status: 'WAITING_RETURN' }))
+    }
+    await Promise.all(ops)
+    toast.success(`補件 ${sup.serial_number} 已解除配對，移回待退貨管理`)
+    supplementCache.value = { ...supplementCache.value, [parentExpense.id]: null }
+    await store.fetchExpenses()
+  } catch {
+    toast.error('解除配對失敗，請稍後再試')
+  } finally {
+    unlinkingSupplementId.value = null
+  }
 }
 </script>
 
@@ -695,6 +725,14 @@ function onDragEnd() {
                     title="批次組詳情"
                   >
                     <Plus :size="13" />
+                  </button>
+                  <button
+                    @click="handleUnlinkSupplement(expense)"
+                    :disabled="unlinkingSupplementId === supplementCache[expense.id]?.id"
+                    class="w-7 h-7 bg-orange-400 hover:bg-orange-500 disabled:opacity-50 text-white rounded flex items-center justify-center transition-colors"
+                    title="解除配對，移回待退貨管理"
+                  >
+                    <Unlink2 :size="13" />
                   </button>
                 </div>
               </td>

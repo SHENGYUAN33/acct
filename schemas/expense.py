@@ -84,6 +84,7 @@ class ExpenseUpdate(BaseModel):
     reject_reason: str | None = None
     # 關聯鏈欄位（可手動修正 AI 判斷錯誤）
     group_id: uuid.UUID | None = None
+    parent_id: uuid.UUID | None = None
     relation_type: str | None = None
     is_active: bool | None = None
     void_reason: str | None = None
