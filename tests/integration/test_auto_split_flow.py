@@ -202,6 +202,7 @@ def _client(db_session: Session):
             patch("services.line_service.reply_text", MagicMock()),
             patch("services.line_service.reply_with_dept_selection", MagicMock()),
             patch("services.line_service.download_image", MagicMock(return_value=None)),
+            patch("main.start_scheduler", MagicMock()),
         ):
             with TestClient(app, raise_server_exceptions=False) as client:
                 yield client, mock_parse
@@ -365,10 +366,12 @@ class TestTriggerByField:
         with (
             patch("services.ocr_service.classify_and_extract", new=AsyncMock(return_value=mock_ocr)),
             patch("services.expense_service.create_batch_expense", side_effect=_fake_create_batch),
+            patch("services.relation_service.attach_orphan_images_to_recent_expense",
+                  return_value=None),
             patch("core.database.SessionLocal", return_value=auto_split_db),
         ):
             from services.auto_split_service import auto_split_process
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 auto_split_process(
                     line_user_id=line_user_id,
                     user_id=user_id,
@@ -377,7 +380,9 @@ class TestTriggerByField:
                 )
             )
 
-        assert called_with_trigger == ["auto_split"]
+        # auto_split_process 使用 stub OCR（is_voucher=False），所有圖片為 orphan
+        # trigger_by 為 "auto_split_orphan"
+        assert called_with_trigger == ["auto_split_orphan"]
 
 
 # ---------------------------------------------------------------------------
@@ -406,20 +411,16 @@ class TestAutoSplitMultipleExpenses:
             expense.serial_number = f"EXP-TEST-{len(create_calls):04d}"
             return expense
 
-        # 兩張圖片的 OCR 都是 is_voucher=True
-        async def _mock_classify(path):
-            return MagicMock(
-                is_voucher=True, voucher_category="INVOICE",
-                fields={"total_amount": 500}, success=True, error=None,
-            )
-
+        # auto_split_process 現在不執行 OCR，所有圖片以 is_voucher=False stub 處理
+        # v2 切割結果：groups=[], orphan_paths=[兩張圖片] → 1 筆孤立報帳
         with (
-            patch("services.ocr_service.classify_and_extract", side_effect=_mock_classify),
             patch("services.expense_service.create_batch_expense", side_effect=_mock_create),
+            patch("services.relation_service.attach_orphan_images_to_recent_expense",
+                  return_value=None),
             patch("core.database.SessionLocal", return_value=auto_split_db),
         ):
             from services.auto_split_service import auto_split_process
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 auto_split_process(
                     line_user_id=line_user_id,
                     user_id=user_id,
@@ -428,10 +429,10 @@ class TestAutoSplitMultipleExpenses:
                 )
             )
 
-        assert len(create_calls) == 2
-        assert all(c["trigger_by"] == "auto_split" for c in create_calls)
-        assert create_calls[0]["paths"] == ["uploads/v1.jpg"]
-        assert create_calls[1]["paths"] == ["uploads/v2.jpg"]
+        assert len(create_calls) == 1
+        assert create_calls[0]["trigger_by"] == "auto_split_orphan"
+        assert "uploads/v1.jpg" in create_calls[0]["paths"]
+        assert "uploads/v2.jpg" in create_calls[0]["paths"]
 
     def test_auto_split_clears_buffer_before_ocr(self, auto_split_db):
         """auto_split_process 應在 OCR 前即清空 buffer（防止重複觸發）"""
@@ -457,10 +458,12 @@ class TestAutoSplitMultipleExpenses:
         with (
             patch("services.ocr_service.classify_and_extract", side_effect=_mock_classify),
             patch("services.expense_service.create_batch_expense", return_value=MagicMock(serial_number="EXP-X")),
+            patch("services.relation_service.attach_orphan_images_to_recent_expense",
+                  return_value=None),
             patch("core.database.SessionLocal", return_value=auto_split_db),
         ):
             from services.auto_split_service import auto_split_process
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 auto_split_process(
                     line_user_id=line_user_id,
                     user_id=user_id,
@@ -486,6 +489,9 @@ class TestNewBufferFormat:
         ):
             mock_settings.enable_auto_split = False
             mock_settings.enable_user_binding = False
+            mock_settings.enable_scheduled_batch = False
+            mock_settings.scheduled_batch_timezone = "Asia/Taipei"
+            mock_settings.scheduled_batch_times = ["20:00"]
             mock_settings.line_channel_secret = "test-channel-secret"
             mock_settings.storage_path = "./uploads"
             mock_settings.max_upload_bytes = 10485760

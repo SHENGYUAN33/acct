@@ -363,9 +363,10 @@ async def process_session_background(
         uploader_dept: str = user.department or ""
 
         # 向後相容：舊版 waiting_return_ref → 新版退貨補件欄位橋接
+        # 注意：waiting_return_ref 代表退貨物品照，對應 RETURN_SUPPLEMENT
+        # 不可設 wr_original_invoice（那會觸發 VOID_REPLACE 換貨換單路徑）
         if not is_return_supplement and waiting_return_ref:
             is_return_supplement = True
-            wr_original_invoice = waiting_return_ref
 
         # 對所有 is_voucher=None 的圖片執行 OCR（add_image 不再執行 OCR，故全部需補跑）
         pending_ocr_tasks: list[tuple[int, SessionImage]] = [
@@ -509,9 +510,15 @@ async def process_session_background(
                         expense.relation_type = "RETURN_SUPPLEMENT"
                         extra = f"換貨收據，原收據日期：{wr_original_date} 金額：{wr_original_amount}"
                         expense.item_description = f"{description} | {extra}" if description else extra
-                    # 未知：僅勾選補件但未填詳細資料
+                    # 未知：僅勾選補件但未填詳細資料，或舊 API waiting_return_ref 橋接
                     else:
                         expense.relation_type = "RETURN_SUPPLEMENT"
+                        if waiting_return_ref:
+                            expense.referenced_invoice_number = waiting_return_ref
+                            ref_note = f"退貨物品照，原憑證：{waiting_return_ref}"
+                            expense.item_description = (
+                                f"{description} | {ref_note}" if description else ref_note
+                            )
                     db.commit()
                     logger.info(
                         "process_session_background: %s group=%d serial=%s",

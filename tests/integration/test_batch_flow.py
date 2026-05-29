@@ -400,6 +400,7 @@ def _webhook_client(db_session: Session, raise_server_exceptions: bool = False):
     with (
         patch("core.database.Base.metadata.create_all", MagicMock()),
         patch("services.line_service.setup_rich_menu", MagicMock(return_value="RMU_test")),
+        patch("main.start_scheduler", MagicMock()),
     ):
         with TestClient(app, raise_server_exceptions=raise_server_exceptions) as client:
             yield client
@@ -635,8 +636,6 @@ class TestBatchSubmitFlow:
             patch("services.line_service.push_text", MagicMock()),
             patch("services.line_service.download_image", MagicMock(return_value=None)),
             patch("pathlib.Path.mkdir", MagicMock()),
-            # mock with_for_update 讓它不產生 SQLite 不支援的選項
-            patch("routers.webhook.with_for_update", side_effect=lambda **kw: None),
         ):
             payload = _make_image_event(line_user_id, message_id="img-acc-001")
             mock_parser.parse.return_value = _build_parsed_events(payload)

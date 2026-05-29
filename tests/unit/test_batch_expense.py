@@ -113,6 +113,12 @@ def _call_create_batch(
     with patch(
         "services.expense_service._generate_serial_number",
         return_value=serial_number,
+    ), patch(
+        "services.relation_service.find_waiting_return_by_invoice",
+        return_value=None,
+    ), patch(
+        "services.expense_service._detect_duplicate_invoice",
+        return_value=None,
     ):
         result = create_batch_expense(
             db=db,
@@ -122,6 +128,7 @@ def _call_create_batch(
             user_description="測試備註",
             uploader_name="王小明",
             uploader_dept="攝影組",
+            skip_auto_link=True,
         )
 
     return result

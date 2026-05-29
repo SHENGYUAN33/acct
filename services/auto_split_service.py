@@ -72,10 +72,36 @@ def multi_split_logic(
     ocr_results: list[VoucherOCRResult],
 ) -> list[tuple[list[str], list[VoucherOCRResult]]]:
     """
-    舊版切割邏輯（保留供向後相容）。
-    建議使用 multi_split_logic_v2，可正確處理「物品圖先於憑證」的情境。
+    以 is_voucher=True 的圖片為群組起點切割批次。
+    - 出現在第一個憑證之前的非憑證圖：各自獨立建一個群組
+    - 出現在某個憑證之後的非憑證圖：歸入前一個憑證的群組
     """
-    groups, _ = multi_split_logic_v2(entries, ocr_results)
+    if not entries:
+        return []
+
+    groups: list[tuple[list[str], list[VoucherOCRResult]]] = []
+    current_paths: list[str] = []
+    current_ocr: list[VoucherOCRResult] = []
+    has_seen_voucher = False
+
+    for entry, result in zip(entries, ocr_results):
+        if result.success and result.is_voucher:
+            if current_paths:
+                groups.append((current_paths, current_ocr))
+            current_paths = [entry.path]
+            current_ocr = [result]
+            has_seen_voucher = True
+        else:
+            if not has_seen_voucher:
+                # 第一個憑證之前的非憑證圖 → 各自獨立建群組
+                groups.append(([entry.path], [result]))
+            else:
+                current_paths.append(entry.path)
+                current_ocr.append(result)
+
+    if current_paths:
+        groups.append((current_paths, current_ocr))
+
     return groups
 
 

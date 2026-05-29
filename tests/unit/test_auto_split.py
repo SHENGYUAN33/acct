@@ -199,7 +199,7 @@ class TestAutoSplitTimer:
             await asyncio.sleep(0.1)
             assert fired == []
 
-        asyncio.get_event_loop().run_until_complete(run())
+        asyncio.run(run())
 
     def test_timer_fires_after_delay(self):
         """schedule 後等待超過 delay → callback 執行"""
@@ -215,7 +215,7 @@ class TestAutoSplitTimer:
             await asyncio.sleep(0.15)
             assert fired == [True]
 
-        asyncio.get_event_loop().run_until_complete(run())
+        asyncio.run(run())
 
     def test_timer_sliding_window(self):
         """連續 schedule 重設視窗，只保留最後一個 task（舊 task 被取消）"""
@@ -239,7 +239,7 @@ class TestAutoSplitTimer:
             # 只應觸發一次
             assert len(fired_count) == 1
 
-        asyncio.get_event_loop().run_until_complete(run())
+        asyncio.run(run())
 
     def test_cancel_nonexistent_user_returns_false(self):
         """對不存在的 user_id 執行 cancel → 返回 False，不 raise"""
@@ -263,4 +263,4 @@ class TestAutoSplitTimer:
             auto_split_timer.cancel("count_user_b")
             assert auto_split_timer.active_count() == initial
 
-        asyncio.get_event_loop().run_until_complete(run())
+        asyncio.run(run())
