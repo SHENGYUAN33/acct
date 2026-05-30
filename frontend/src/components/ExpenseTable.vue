@@ -40,8 +40,21 @@ const fetchingParent = ref(new Set())
 // WAITING_RETURN 補件快取（key: invoice expense.id, value: 補件 expense | null | 'loading' | 'error'）
 const supplementCache = ref({})
 
-// store 刷新後清除 supplementCache，確保展開時拿到最新補件狀態
-watch(() => store.expenses, () => { supplementCache.value = {} })
+// store 刷新後清除快取，並對目前已展開的列立即重新抓取
+watch(() => store.expenses, async () => {
+  const currentExpanded = new Set(expandedRows.value)
+  supplementCache.value = {}
+  for (const id of currentExpanded) {
+    supplementCache.value = { ...supplementCache.value, [id]: 'loading' }
+    try {
+      const res = await fetchRelatedExpenses(id)
+      const items = res.data?.data ?? []
+      supplementCache.value = { ...supplementCache.value, [id]: items.map(normalizeImageUrls) }
+    } catch {
+      supplementCache.value = { ...supplementCache.value, [id]: 'error' }
+    }
+  }
+})
 
 // 批次組 Modal
 const batchModalExpenseId = ref(null)
@@ -61,10 +74,8 @@ async function toggleExpand(expense) {
       try {
         const res = await fetchRelatedExpenses(id)
         const items = res.data?.data ?? []
-        const sup = items.find(e =>
-          ['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE'].includes(e.relation_type)
-        ) ?? null
-        supplementCache.value = { ...supplementCache.value, [id]: normalizeImageUrls(sup) }
+        // 不過濾 relation_type：有 parent_id 的子記錄一律顯示（含 relation_type=null 的手動配對補件）
+        supplementCache.value = { ...supplementCache.value, [id]: items.map(normalizeImageUrls) }
       } catch {
         supplementCache.value = { ...supplementCache.value, [id]: 'error' }
       }
@@ -155,6 +166,18 @@ function formatAmount(amount) {
   return `$${Number(amount).toLocaleString()}`
 }
 
+function formatDateTime(val) {
+  if (!val) return '-'
+  const d = new Date(val)
+  if (isNaN(d.getTime())) return val
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`
+}
+
 // 已配對的補件（parent_id 已設定）不在主表格顯示（改由父憑證展開子列呈現）
 const visibleExpenses = computed(() =>
   store.paginatedExpenses.filter(e =>
@@ -199,25 +222,25 @@ function onDragEnd() {
 // ── 補件解除配對 ──────────────────────────────────────────────────
 const unlinkingSupplementId = ref(null)
 
-async function handleUnlinkSupplement(parentExpense) {
-  const sup = supplementCache.value[parentExpense.id]
+async function handleUnlinkSupplement(parentExpense, sup) {
   if (!sup || unlinkingSupplementId.value === sup.id) return
   unlinkingSupplementId.value = sup.id
   try {
-    const wasCompleted = sup.status === 'COMPLETED'
     const ops = [
       apiUpdateExpense(sup.id, {
         parent_id: null,
         referenced_invoice_number: null,
-        ...(wasCompleted ? { status: 'PENDING' } : {}),
       }),
     ]
-    if (wasCompleted) {
+    // finalizeCase 後父憑證狀態為 PENDING，解除時還原為 WAITING_RETURN
+    if (parentExpense.status === 'PENDING') {
       ops.push(apiUpdateExpense(parentExpense.id, { status: 'WAITING_RETURN' }))
     }
     await Promise.all(ops)
     toast.success(`補件 ${sup.serial_number} 已解除配對，移回待退貨管理`)
-    supplementCache.value = { ...supplementCache.value, [parentExpense.id]: null }
+    // 從快取陣列中移除已解除的補件
+    const remaining = (supplementCache.value[parentExpense.id] || []).filter(s => s.id !== sup.id)
+    supplementCache.value = { ...supplementCache.value, [parentExpense.id]: remaining }
     await store.fetchExpenses()
   } catch {
     toast.error('解除配對失敗，請稍後再試')
@@ -228,6 +251,13 @@ async function handleUnlinkSupplement(parentExpense) {
 </script>
 
 <template>
+  <!-- Bug 8：client-side 篩選只作用於已載入的頁面資料，提示使用者 -->
+  <div
+    v-if="store.filters.dept || store.filters.category"
+    class="mb-2 rounded-lg bg-yellow-50 border border-yellow-300 px-4 py-2 text-sm text-yellow-800"
+  >
+    ⚠️ 組別 / 費用科目篩選僅套用於已載入的 <strong>{{ store.expenses.length }}</strong> 筆資料，如需完整搜尋請改用上方關鍵字欄位。
+  </div>
   <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
     <div class="overflow-x-auto">
       <table class="w-full text-sm border-collapse">
@@ -530,7 +560,7 @@ async function handleUnlinkSupplement(parentExpense) {
                   </div>
                   <div>
                     <span class="font-medium text-gray-500">上傳日期：</span>
-                    {{ expense.upload_date || '-' }}
+                    {{ formatDateTime(expense.upload_date) }}
                   </div>
                   <div>
                     <span class="font-medium text-gray-500">消費日期：</span>
@@ -570,7 +600,7 @@ async function handleUnlinkSupplement(parentExpense) {
 
             <!-- 原單子列（VOID_REPLACE 展開時顯示被取代的舊單） -->
             <tr
-              v-if="expandedRows.has(expense.id) && (expense.relation_type === 'VOID_REPLACE' || expense.relation_type === 'CREDIT_NOTE')"
+              v-if="expandedRows.has(expense.id) && expense.parent_id && (expense.relation_type === 'VOID_REPLACE' || expense.relation_type === 'CREDIT_NOTE')"
               class="border-b border-dashed border-gray-300"
             >
               <td colspan="14" class="bg-gray-100 px-6 py-2.5">
@@ -646,7 +676,7 @@ async function handleUnlinkSupplement(parentExpense) {
 
             <!-- 待退貨補件子列：尚無補件（僅 WAITING_RETURN 顯示此提示） -->
             <tr
-              v-if="expandedRows.has(expense.id) && expense.status === 'WAITING_RETURN' && supplementCache[expense.id] === null"
+              v-if="expandedRows.has(expense.id) && expense.status === 'WAITING_RETURN' && Array.isArray(supplementCache[expense.id]) && supplementCache[expense.id].length === 0"
               class="border-b border-dashed border-purple-200"
             >
               <td colspan="15" class="bg-purple-50 px-6 py-2.5">
@@ -657,9 +687,10 @@ async function handleUnlinkSupplement(parentExpense) {
               </td>
             </tr>
 
-            <!-- 待退貨補件子列：完整列（有補件時顯示，含配對完成後 PENDING 狀態） -->
+            <!-- 待退貨補件子列：完整列（v-for 支援多筆補件） -->
             <tr
-              v-if="expandedRows.has(expense.id) && supplementCache[expense.id] && supplementCache[expense.id] !== 'loading' && supplementCache[expense.id] !== 'error'"
+              v-for="sup in (Array.isArray(supplementCache[expense.id]) ? supplementCache[expense.id] : [])"
+              :key="sup.id"
               class="border-b border-dashed border-purple-200 bg-purple-50"
             >
               <!-- td1: 拖曳佔位 -->
@@ -675,60 +706,60 @@ async function handleUnlinkSupplement(parentExpense) {
 
               <!-- td4: 案件編號 -->
               <td class="px-3 py-1.5 text-gray-700 font-medium whitespace-nowrap font-mono text-xs">
-                {{ supplementCache[expense.id].serial_number }}
+                {{ sup.serial_number }}
               </td>
 
               <!-- td5: 狀態燈號 -->
               <td class="px-3 py-1.5">
                 <span
                   class="inline-block w-3 h-3 rounded-full"
-                  :class="getStatusConfig(supplementCache[expense.id].status).dot"
-                  :title="getStatusConfig(supplementCache[expense.id].status).label"
+                  :class="getStatusConfig(sup.status).dot"
+                  :title="getStatusConfig(sup.status).label"
                 ></span>
               </td>
 
               <!-- td6: 上傳人 -->
               <td class="px-3 py-1.5 text-gray-700 whitespace-nowrap text-xs">
-                {{ supplementCache[expense.id].uploader_name }}
+                {{ sup.uploader_name }}
               </td>
 
               <!-- td7: 上傳者組別 -->
               <td class="px-3 py-1.5 text-gray-600 whitespace-nowrap text-xs">
-                {{ supplementCache[expense.id].uploader_dept || '-' }}
+                {{ sup.uploader_dept || '-' }}
               </td>
 
               <!-- td8: 費用提報者 -->
               <td class="px-3 py-1.5 text-gray-700 whitespace-nowrap text-xs">
-                {{ supplementCache[expense.id].submitter_name || '-' }}
+                {{ sup.submitter_name || '-' }}
               </td>
 
               <!-- td9: 操作 -->
               <td class="px-3 py-1.5 whitespace-nowrap">
                 <div class="flex items-center gap-1.5">
                   <button
-                    @click="store.openAudit(supplementCache[expense.id])"
+                    @click="store.openAudit(sup)"
                     class="w-7 h-7 bg-blue-500 hover:bg-blue-600 text-white rounded flex items-center justify-center transition-colors"
                     title="編輯 / 審核"
                   >
                     <Pencil :size="13" />
                   </button>
                   <button
-                    @click="handleDelete(supplementCache[expense.id])"
+                    @click="handleDelete(sup)"
                     class="w-7 h-7 bg-red-500 hover:bg-red-600 text-white rounded flex items-center justify-center transition-colors"
                     title="刪除"
                   >
                     <Trash2 :size="13" />
                   </button>
                   <button
-                    @click="openBatchModal(supplementCache[expense.id])"
+                    @click="openBatchModal(sup)"
                     class="w-7 h-7 bg-green-500 hover:bg-green-600 text-white rounded flex items-center justify-center transition-colors"
                     title="批次組詳情"
                   >
                     <Plus :size="13" />
                   </button>
                   <button
-                    @click="handleUnlinkSupplement(expense)"
-                    :disabled="unlinkingSupplementId === supplementCache[expense.id]?.id"
+                    @click="handleUnlinkSupplement(expense, sup)"
+                    :disabled="unlinkingSupplementId === sup.id"
                     class="w-7 h-7 bg-orange-400 hover:bg-orange-500 disabled:opacity-50 text-white rounded flex items-center justify-center transition-colors"
                     title="解除配對，移回待退貨管理"
                   >
@@ -742,15 +773,15 @@ async function handleUnlinkSupplement(parentExpense) {
                 <div class="flex items-center gap-1 flex-wrap">
                   <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-600 border border-purple-200">補件</span>
                   <span
-                    v-if="supplementCache[expense.id]?.relation_type === 'VOID_REPLACE'"
+                    v-if="sup.relation_type === 'VOID_REPLACE'"
                     class="text-[9px] px-1 py-0.5 rounded bg-blue-100 text-blue-600"
                   >換新發票</span>
                   <span
-                    v-else-if="supplementCache[expense.id]?.relation_type === 'CREDIT_NOTE'"
+                    v-else-if="sup.relation_type === 'CREDIT_NOTE'"
                     class="text-[9px] px-1 py-0.5 rounded bg-orange-100 text-orange-600"
                   >折讓單</span>
                   <span
-                    v-else-if="supplementCache[expense.id]?.relation_type === 'RETURN_SUPPLEMENT'"
+                    v-else-if="sup.relation_type === 'RETURN_SUPPLEMENT'"
                     class="text-[9px] px-1 py-0.5 rounded bg-purple-100 text-purple-600"
                   >換貨收據</span>
                 </div>
@@ -761,9 +792,9 @@ async function handleUnlinkSupplement(parentExpense) {
 
               <!-- td12: 憑證類別 -->
               <td class="px-3 py-1.5 whitespace-nowrap">
-                <template v-if="supplementCache[expense.id].voucher_categories?.length">
+                <template v-if="sup.voucher_categories?.length">
                   <span
-                    v-for="cat in supplementCache[expense.id].voucher_categories"
+                    v-for="cat in sup.voucher_categories"
                     :key="cat"
                     class="inline-block text-xs px-1.5 py-0.5 rounded mr-1 mb-0.5 bg-blue-100 text-blue-700"
                   >{{ cat }}</span>
@@ -774,10 +805,10 @@ async function handleUnlinkSupplement(parentExpense) {
               <!-- td13: 費用影像 -->
               <td class="px-3 py-1.5">
                 <div
-                  v-if="supplementCache[expense.id].image_url?.length"
+                  v-if="sup.image_url?.length"
                   class="w-10 h-10 rounded overflow-hidden border border-purple-200"
                 >
-                  <img :src="supplementCache[expense.id].image_url[0]" alt="費用影像" class="w-full h-full object-cover" />
+                  <img :src="sup.image_url[0]" alt="費用影像" class="w-full h-full object-cover" />
                 </div>
                 <div v-else class="w-10 h-10 bg-gray-200 rounded border border-gray-300 flex items-center justify-center">
                   <span class="text-gray-400 text-xs">無</span>
@@ -787,10 +818,10 @@ async function handleUnlinkSupplement(parentExpense) {
               <!-- td14: 物品影像 -->
               <td class="px-3 py-1.5">
                 <div
-                  v-if="supplementCache[expense.id].item_image_url?.length"
+                  v-if="sup.item_image_url?.length"
                   class="w-10 h-10 rounded overflow-hidden border border-purple-200"
                 >
-                  <img :src="supplementCache[expense.id].item_image_url[0]" alt="物品影像" class="w-full h-full object-cover" />
+                  <img :src="sup.item_image_url[0]" alt="物品影像" class="w-full h-full object-cover" />
                 </div>
                 <div v-else class="w-10 h-10 bg-gray-200 rounded border border-gray-300 flex items-center justify-center">
                   <span class="text-gray-400 text-xs">無</span>
@@ -800,10 +831,10 @@ async function handleUnlinkSupplement(parentExpense) {
               <!-- td15: 項目說明 + 金額 -->
               <td class="px-3 py-1.5 text-gray-600 max-w-xs">
                 <div class="line-clamp-2 text-xs leading-relaxed">
-                  {{ supplementCache[expense.id].item_description || '-' }}
+                  {{ sup.item_description || '-' }}
                 </div>
-                <div v-if="supplementCache[expense.id].total_amount" class="text-xs text-gray-400 mt-0.5">
-                  {{ formatAmount(supplementCache[expense.id].total_amount) }}
+                <div v-if="sup.total_amount" class="text-xs text-gray-400 mt-0.5">
+                  {{ formatAmount(sup.total_amount) }}
                 </div>
               </td>
             </tr>

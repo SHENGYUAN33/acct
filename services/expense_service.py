@@ -8,7 +8,7 @@ from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, nullslast
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -185,6 +185,7 @@ def list_expenses(
     q: str | None = None,
     referenced_invoice_number: str | None = None,
     has_duplicate: bool | None = None,
+    relation_type: str | None = None,
 ) -> tuple[int, list[Expense]]:
     """Return (total_count, expenses) with optional filters and pagination.
 
@@ -192,8 +193,12 @@ def list_expenses(
     q：模糊搜尋案件編號或上傳者姓名（ILIKE）。
     referenced_invoice_number：精確篩選補件所參考的原始憑證號碼。
     has_duplicate=True：只回傳 possible_duplicate_of 非 null 的疑似重複記錄。
+    relation_type：精確篩選補件類型（如 RETURN_SUPPLEMENT）。
     """
-    stmt = select(Expense).order_by(Expense.created_at.desc())
+    stmt = select(Expense).order_by(
+        nullslast(Expense.display_order),
+        Expense.created_at.desc()
+    )
 
     if not include_inactive:
         stmt = stmt.where(Expense.is_active == True)
@@ -212,6 +217,8 @@ def list_expenses(
         stmt = stmt.where(Expense.referenced_invoice_number == referenced_invoice_number)
     if has_duplicate is True:
         stmt = stmt.where(Expense.possible_duplicate_of.isnot(None))
+    if relation_type:
+        stmt = stmt.where(Expense.relation_type == relation_type)
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     items = db.scalars(stmt.offset((page - 1) * page_size).limit(page_size)).all()
@@ -269,6 +276,14 @@ def delete_expense(db: Session, expense_id: uuid.UUID) -> bool:
     expense = get_expense(db, expense_id)
     if not expense:
         return False
+    # Bug 3：若刪除 VOID_REPLACE 補件，先還原被取代的原始憑證狀態
+    if expense.relation_type == "VOID_REPLACE" and expense.parent_id:
+        original = db.get(Expense, expense.parent_id)
+        if original:
+            original.is_active = True
+            original.status = ExpenseStatus.WAITING_RETURN
+            original.void_reason = None
+            db.add(original)
     # 若為有發票號碼的憑證（WAITING_RETURN），連帶刪除所有以此發票號碼為 referenced_invoice_number 的 RETURN_SUPPLEMENT 補件
     if expense.invoice_number:
         supplements = list(db.scalars(

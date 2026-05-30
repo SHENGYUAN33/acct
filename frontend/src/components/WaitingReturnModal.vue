@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { X, Loader2, PackageX, CheckCircle2, ChevronRight, ChevronDown, Search, Link2, Unlink2, Trash2 } from 'lucide-vue-next'
-import { fetchWaitingReturns, fetchExpenses, updateExpense, deleteExpense, pairExpense } from '../api/expenseApi'
+import { fetchWaitingReturns, fetchExpenses, fetchRelatedExpenses, updateExpense, deleteExpense, pairExpense } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
 import { API_BASE_URL } from '../utils/axios'
 
@@ -29,8 +29,8 @@ const pendingLink = ref(null)  // { supplementId, supplementSerial, invoiceId, i
 const isLinking = ref(false)
 
 // ── 動作按鈕 ───────────────────────────────────────────────────────
-const completingId = ref(null)
 const unlinkingId = ref(null)
+const finalizingInvoiceId = ref(null)
 
 // ── 左欄：手動加入原始交易 ─────────────────────────────────────────
 const leftSearchQuery = ref('')
@@ -94,7 +94,8 @@ async function searchSupplements() {
   if (!q) { searchResults.value = []; return }
   isSearching.value = true
   try {
-    const res = await fetchExpenses({ q, page_size: 30 })
+    // Bug 7：提高 page_size 上限，確保搜尋結果涵蓋所有補件類型
+    const res = await fetchExpenses({ q, page_size: 100 })
     searchResults.value = (res.data?.data?.items ?? [])
       .filter(e => ['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE'].includes(e.relation_type))
   } catch {
@@ -213,34 +214,52 @@ async function searchLeftPanel() {
   }
 }
 
-function addToLeftPanel(expense) {
-  cases.value = [{ invoice: expense, supplement: null }, ...cases.value]
+async function addToLeftPanel(expense) {
+  // 1. 將憑證狀態設為 WAITING_RETURN，確保 loadData() 重建後仍顯示於左側
+  if (expense.status !== 'WAITING_RETURN') {
+    try {
+      await updateExpense(expense.id, { status: 'WAITING_RETURN' })
+      expense = { ...expense, status: 'WAITING_RETURN' }
+    } catch {
+      toast.error('無法將該憑證標記為待退貨，請稍後再試')
+      return
+    }
+  }
+  // 2. 查詢已存在的補件（parent_id 指向此憑證）
+  let existingSupplements = []
+  try {
+    const res = await fetchRelatedExpenses(expense.id)
+    existingSupplements = (res.data?.data ?? [])
+      .filter(e => ['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE'].includes(e.relation_type))
+  } catch { /* 靜默失敗，顯示空補件 */ }
+  cases.value = [{ invoice: expense, supplements: existingSupplements }, ...cases.value]
   leftSearchQuery.value = ''
   leftSearchResults.value = []
   showLeftSearch.value = false
+  emit('count-changed')
 }
 
-// ── 確認配對完成：補件 → COMPLETED，憑證 → PENDING ────────────────
-async function markCompleted(caseItem) {
-  const key = caseItem.supplement.id
-  if (completingId.value === key) return
-  completingId.value = key
+// ── 案件層級確認完成：所有補件 → COMPLETED，憑證 → PENDING ──────────
+// 確保無論補件個別狀態為何，都能一鍵將案件移出待退貨管理
+async function finalizeCase(item) {
+  const invoice = item.invoice
+  if (finalizingInvoiceId.value === invoice.id) return
+  finalizingInvoiceId.value = invoice.id
   try {
-    // 若補件僅以 referenced_invoice_number 配對（parent_id 尚未設定），補呼叫 pair API
-    if (!caseItem.supplement.parent_id) {
-      await pairExpense(caseItem.supplement.id, caseItem.invoice.id)
+    const ops = []
+    for (const sup of (item.supplements ?? [])) {
+      if (!sup.parent_id) ops.push(pairExpense(sup.id, invoice.id))
+      if (sup.status !== 'PENDING') ops.push(updateExpense(sup.id, { status: 'PENDING' }))
     }
-    await Promise.all([
-      updateExpense(caseItem.supplement.id, { status: 'COMPLETED' }),
-      updateExpense(caseItem.invoice.id, { status: 'PENDING' }),
-    ])
-    toast.success('配對完成，憑證已移至待審核')
+    ops.push(updateExpense(invoice.id, { status: 'PENDING' }))
+    await Promise.all(ops)
+    toast.success('案件已完成，憑證移至待審核')
     await loadData()
     emit('count-changed')
   } catch {
     toast.error('操作失敗，請稍後再試')
   } finally {
-    completingId.value = null
+    finalizingInvoiceId.value = null
   }
 }
 
@@ -267,16 +286,14 @@ async function unlinkSupplement(supplement, invoice) {
   if (unlinkingId.value === supplement.id) return
   unlinkingId.value = supplement.id
   try {
-    const wasCompleted = supplement.status === 'COMPLETED'
     const ops = [
       updateExpense(supplement.id, {
         parent_id: null,
         referenced_invoice_number: null,
-        ...(wasCompleted ? { status: 'PENDING' } : {}),
       }),
     ]
-    // markCompleted 時將原始憑證改為 PENDING，解除時還原為 WAITING_RETURN
-    if (wasCompleted && invoice) {
+    // finalizeCase 後父憑證狀態為 PENDING，解除時還原為 WAITING_RETURN
+    if (invoice && invoice.status === 'PENDING') {
       ops.push(updateExpense(invoice.id, { status: 'WAITING_RETURN' }))
     }
     await Promise.all(ops)
@@ -284,7 +301,7 @@ async function unlinkSupplement(supplement, invoice) {
     await loadData()
     // 手動加入的原始憑證（非 WAITING_RETURN）不在後端查詢範圍內，loadData 後補回左側
     if (invoice && !cases.value.some(c => c.invoice.id === invoice.id)) {
-      cases.value = [{ invoice, supplement: null }, ...cases.value]
+      cases.value = [{ invoice, supplements: [] }, ...cases.value]
     }
     emit('count-changed')
   } catch {
@@ -315,14 +332,6 @@ async function unlinkSupplement(supplement, invoice) {
       <div v-if="isLoading" class="flex-1 flex items-center justify-center text-gray-400">
         <Loader2 :size="28" class="animate-spin mr-2" />
         <span class="text-sm">載入中...</span>
-      </div>
-
-      <!-- Empty -->
-      <div v-else-if="cases.length === 0 && orphanSupplements.length === 0"
-        class="flex-1 flex flex-col items-center justify-center text-gray-400 gap-3">
-        <PackageX :size="40" class="opacity-25" />
-        <p class="text-sm font-medium">目前無待退貨案件</p>
-        <p class="text-xs text-gray-300">備註含「待退貨」的報帳會顯示於此</p>
       </div>
 
       <!-- Main: 左右分欄 -->
@@ -374,6 +383,15 @@ async function unlinkSupplement(supplement, invoice) {
           </div>
 
           <div class="flex-1 overflow-y-auto">
+
+            <!-- 左欄無案件空狀態 -->
+            <div v-if="cases.length === 0"
+              class="flex flex-col items-center justify-center h-full text-gray-300 text-xs gap-2 pb-8">
+              <PackageX :size="32" class="opacity-30" />
+              <span class="text-gray-400 text-sm font-medium">目前無待退貨案件</span>
+              <span class="text-gray-300">備註含「待退貨」的報帳會顯示於此</span>
+            </div>
+
           <div class="divide-y divide-gray-100">
             <div
               v-for="(item, idx) in cases"
@@ -416,10 +434,10 @@ async function unlinkSupplement(supplement, invoice) {
                 <!-- 右側 badge -->
                 <div class="ml-auto flex items-center gap-1.5 shrink-0">
                   <!-- 補件狀態 badge -->
-                  <span v-if="item.supplement && item.supplement.status === 'COMPLETED'"
-                    class="text-[10px] bg-teal-100 text-teal-600 px-1.5 py-0.5 rounded">已結清</span>
-                  <span v-else-if="item.supplement"
-                    class="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded">已配對</span>
+                  <span v-if="item.supplements?.length > 0"
+                    class="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded">
+                    已配對{{ item.supplements.length > 1 ? ` (${item.supplements.length})` : '' }}
+                  </span>
                   <span v-else
                     class="text-[10px] bg-orange-100 text-orange-500 px-1.5 py-0.5 rounded">待配對</span>
 
@@ -450,67 +468,81 @@ async function unlinkSupplement(supplement, invoice) {
                   </div>
                 </div>
 
-                <!-- 有補件 -->
-                <div v-if="item.supplement" class="bg-gray-50 rounded-xl border border-gray-200 p-3 space-y-2">
+                <!-- 已配對的補件（多筆 v-for） -->
+                <div
+                  v-for="sup in (item.supplements ?? [])"
+                  :key="sup.id"
+                  class="bg-gray-50 rounded-xl border border-gray-200 p-3 space-y-2"
+                >
                   <div class="flex items-center gap-1.5">
                     <span class="w-1.5 h-1.5 rounded-full shrink-0"
-                      :class="STATUS_DOT[item.supplement.status] ?? 'bg-gray-300'" />
-                    <span class="font-mono text-[11px] text-gray-600">{{ item.supplement.serial_number }}</span>
-                    <span class="text-[10px] text-gray-400">{{ item.supplement.uploader_name }}</span>
-                    <span v-if="item.supplement.status === 'COMPLETED'"
-                      class="ml-auto text-[10px] bg-teal-100 text-teal-600 px-1.5 py-0.5 rounded">已結清</span>
+                      :class="STATUS_DOT[sup.status] ?? 'bg-gray-300'" />
+                    <span class="font-mono text-[11px] text-gray-600">{{ sup.serial_number }}</span>
+                    <span class="text-[10px] text-gray-400">{{ sup.uploader_name }}</span>
                   </div>
 
-                  <!-- 補件圖片 -->
+                  <!-- 補件圖片（image_url = 費用憑證照，item_image_url = 退貨物品照） -->
                   <div class="flex flex-wrap gap-2">
-                    <div v-for="img in (item.supplement.images ?? [])" :key="img.id"
-                      class="relative shrink-0 cursor-zoom-in"
-                      @click="openLightbox(imgUrl(img.image_url))">
-                      <img :src="imgUrl(img.image_url)" alt="補件圖片"
-                        class="w-14 h-14 object-cover rounded-lg border border-gray-200 hover:opacity-80 transition-opacity" />
-                      <span
-                        :class="img.is_voucher ? 'bg-green-600' : 'bg-gray-600'"
-                        class="absolute bottom-0 inset-x-0 text-[8px] text-white text-center rounded-b-lg py-0.5"
-                      >{{ img.is_voucher ? '憑證' : '物品照' }}</span>
-                    </div>
-                    <div v-if="!(item.supplement.images?.length)" class="text-xs text-gray-300 italic py-2">
+                    <img
+                      v-for="(url, i) in (sup.image_url ?? [])"
+                      :key="'sup-img-' + i"
+                      :src="imgUrl(url)"
+                      alt="補件憑證"
+                      @click="openLightbox(imgUrl(url))"
+                      class="w-14 h-14 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:opacity-80 transition-opacity"
+                    />
+                    <img
+                      v-for="(url, i) in (sup.item_image_url ?? [])"
+                      :key="'sup-item-' + i"
+                      :src="imgUrl(url)"
+                      alt="補件物品照"
+                      @click="openLightbox(imgUrl(url))"
+                      class="w-14 h-14 object-cover rounded-lg border border-purple-200 cursor-zoom-in hover:opacity-80 transition-opacity ring-1 ring-purple-300"
+                    />
+                    <div v-if="!(sup.image_url?.length) && !(sup.item_image_url?.length)" class="text-xs text-gray-300 italic py-2">
                       （無圖片）
                     </div>
                   </div>
 
-                  <!-- 動作按鈕 -->
+                  <!-- 補件操作：只有解除（案件整體確認由底部按鈕處理） -->
                   <div class="flex gap-2 pt-1">
                     <button
-                      v-if="item.supplement.status !== 'COMPLETED'"
-                      @click.stop="markCompleted(item)"
-                      :disabled="completingId === item.supplement.id"
-                      class="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
-                      title="補件標記完成，憑證移至待審核"
-                    >
-                      <Loader2 v-if="completingId === item.supplement.id" :size="12" class="animate-spin" />
-                      <CheckCircle2 v-else :size="12" />
-                      {{ completingId === item.supplement.id ? '處理中...' : '確認配對完成' }}
-                    </button>
-                    <button
-                      @click.stop="unlinkSupplement(item.supplement, item.invoice)"
-                      :disabled="unlinkingId === item.supplement.id"
+                      @click.stop="unlinkSupplement(sup, item.invoice)"
+                      :disabled="unlinkingId === sup.id"
                       class="flex items-center gap-1 px-3 py-1.5 border border-gray-300 hover:border-red-300 hover:text-red-500 text-gray-500 text-xs rounded-lg transition-colors disabled:opacity-50"
                       title="解除配對，補件移回孤立補件區"
                     >
-                      <Loader2 v-if="unlinkingId === item.supplement.id" :size="12" class="animate-spin" />
+                      <Loader2 v-if="unlinkingId === sup.id" :size="12" class="animate-spin" />
                       <Unlink2 v-else :size="12" />
                       解除
                     </button>
                   </div>
                 </div>
 
-                <!-- 無補件：提示拖曳 -->
-                <div v-else
-                  class="flex items-center justify-center h-16 border-2 border-dashed rounded-xl text-xs text-gray-400 transition-colors"
-                  :class="dragOverInvoiceId === item.invoice.id ? 'border-purple-400 text-purple-400 bg-purple-50' : 'border-gray-200'"
+                <!-- 案件層級確認完成（永遠顯示，讓案件可移出待退貨管理） -->
+                <div class="pt-1">
+                  <button
+                    @click.stop="finalizeCase(item)"
+                    :disabled="finalizingInvoiceId === item.invoice.id"
+                    class="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
+                  >
+                    <Loader2 v-if="finalizingInvoiceId === item.invoice.id" :size="12" class="animate-spin" />
+                    <CheckCircle2 v-else :size="12" />
+                    {{ finalizingInvoiceId === item.invoice.id ? '處理中...' : '確認配對完成' }}
+                  </button>
+                </div>
+
+                <!-- 拖曳放置區（永遠顯示，支援繼續新增補件） -->
+                <div
+                  class="flex items-center justify-center h-12 border-2 border-dashed rounded-xl text-xs transition-colors"
+                  :class="dragOverInvoiceId === item.invoice.id
+                    ? 'border-purple-400 text-purple-400 bg-purple-50'
+                    : item.supplements?.length
+                      ? 'border-gray-100 text-gray-300'
+                      : 'border-gray-200 text-gray-400'"
                 >
-                  <Link2 :size="14" class="mr-1.5" />
-                  從右欄拖曳補件至此以配對
+                  <Link2 :size="13" class="mr-1.5" />
+                  {{ item.supplements?.length ? '繼續拖曳補件至此' : '從右欄拖曳補件至此以配對' }}
                 </div>
               </div>
             </div>

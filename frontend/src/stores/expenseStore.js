@@ -43,9 +43,9 @@ function mapExpense(item, index) {
     ...item,
     // 顯示用流水號（以 created_at 排序後的順序，index 由父層傳入）
     serial: index + 1,
-    // 拼接後端靜態檔案 URL（ARRAY → 每個元素加 baseURL）
-    image_url: (item.image_url || []).map(url => `${BACKEND_BASE_URL}/${url}`),
-    item_image_url: (item.item_image_url || []).map(url => `${BACKEND_BASE_URL}/${url}`),
+    // 拼接後端靜態檔案 URL（ARRAY → 每個元素加 baseURL，已含 http 則不重複拼接）
+    image_url: (item.image_url || []).map(url => url.startsWith('http') ? url : `${BACKEND_BASE_URL}/${url}`),
+    item_image_url: (item.item_image_url || []).map(url => url.startsWith('http') ? url : `${BACKEND_BASE_URL}/${url}`),
     // 後端尚未支援的前端欄位（預設值）
     is_asset: item.is_asset ?? false,
     return_original_data: item.return_original_data ?? '',
@@ -364,7 +364,7 @@ export const useExpenseStore = defineStore('expense', () => {
     const res = await apiUploadImage(id, file, imageType)
     const updated = res.data.data
     const field = imageType === 'expense' ? 'image_url' : 'item_image_url'
-    const newUrls = (updated[field] || []).map(url => `${BACKEND_BASE_URL}/${url}`)
+    const newUrls = (updated[field] || []).map(url => url.startsWith('http') ? url : `${BACKEND_BASE_URL}/${url}`)
     const idx = expenses.value.findIndex((e) => e.id === id)
     if (idx !== -1) expenses.value[idx][field] = newUrls
     return newUrls  // 回傳帶 baseURL 的陣列
@@ -374,7 +374,7 @@ export const useExpenseStore = defineStore('expense', () => {
     const res = await apiReplaceImage(id, file, imageType, index)
     const updated = res.data.data
     const field = imageType === 'expense' ? 'image_url' : 'item_image_url'
-    const newUrls = (updated[field] || []).map(url => `${BACKEND_BASE_URL}/${url}`)
+    const newUrls = (updated[field] || []).map(url => url.startsWith('http') ? url : `${BACKEND_BASE_URL}/${url}`)
     const idx = expenses.value.findIndex((e) => e.id === id)
     if (idx !== -1) expenses.value[idx][field] = newUrls
     return newUrls

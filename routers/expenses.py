@@ -58,6 +58,7 @@ def list_expenses(
     q: str | None = Query(default=None, description="模糊搜尋：案件編號或上傳者姓名"),
     referenced_invoice_number: str | None = Query(default=None, description="篩選指定原始憑證號碼的補件"),
     has_duplicate: bool | None = Query(default=None, description="True 時只回傳疑似重複憑證的 Expense"),
+    relation_type: str | None = Query(default=None, description="精確篩選補件類型，如 RETURN_SUPPLEMENT"),
     db: Session = Depends(get_db),
 ) -> dict:
     total, items = expense_service.list_expenses(
@@ -65,6 +66,7 @@ def list_expenses(
         page=page, page_size=page_size, include_inactive=include_inactive, q=q,
         referenced_invoice_number=referenced_invoice_number,
         has_duplicate=has_duplicate,
+        relation_type=relation_type,
     )
     return {
         "status": "success",
@@ -173,12 +175,13 @@ def list_waiting_returns(
         ).order_by(Expense.created_at.desc())
     ).all())
 
-    # Step 2b：取所有已以 parent_id 明確配對的補件（不限原始憑證狀態，COMPLETED 除外）
+    # Step 2b：取所有已以 parent_id 明確配對的補件（含 COMPLETED）
+    # COMPLETED 補件若原始憑證仍為 WAITING_RETURN，仍需顯示於左側供確認；
+    # 若原始憑證已離開 WAITING_RETURN（如 PENDING），則在 Step 5b 中過濾掉。
     all_paired_supplements: list[Expense] = list(db.scalars(
         select(Expense).where(
             Expense.relation_type.in_(["VOID_REPLACE", "CREDIT_NOTE", "RETURN_SUPPLEMENT"]),
             Expense.parent_id.isnot(None),
-            Expense.status != ExpenseStatus.COMPLETED,
             Expense.is_active == True,
         ).order_by(Expense.created_at.desc())
     ).all())
@@ -206,20 +209,26 @@ def list_waiting_returns(
 
     all_left_invoices = list(invoice_by_id.values())
     matched_invoice_ids: set[uuid.UUID] = set()
-    cases = []
+    # cases_dict：以 invoice.id 為 key，支援同一張原始憑證對應多筆補件
+    cases_dict: dict[str, dict] = {}
     orphan_supplements = []
 
-    # Step 5：補件配對原始憑證
+    # Step 5：補件配對原始憑證（parent_id IS NULL，以 referenced_invoice_number 匹配）
     for sup in supplements:
         matched_invoice: Expense | None = None
         if sup.referenced_invoice_number:
             matched_invoice = invoice_by_number.get(sup.referenced_invoice_number)
         if matched_invoice:
-            matched_invoice_ids.add(matched_invoice.id)
-            cases.append({
-                "invoice": ExpenseWithImages.model_validate(matched_invoice).model_dump(),
-                "supplement": ExpenseWithImages.model_validate(sup).model_dump(),
-            })
+            key = str(matched_invoice.id)
+            if key not in cases_dict:
+                cases_dict[key] = {
+                    "invoice": ExpenseWithImages.model_validate(matched_invoice).model_dump(),
+                    "supplements": [],
+                }
+                matched_invoice_ids.add(matched_invoice.id)
+            cases_dict[key]["supplements"].append(
+                ExpenseWithImages.model_validate(sup).model_dump()
+            )
         else:
             # COMPLETED 補件已完成配對流程，不再顯示於孤立補件區
             if sup.status != ExpenseStatus.COMPLETED:
@@ -245,19 +254,31 @@ def list_waiting_returns(
                 matched_invoice = parent
                 invoice_by_id[parent.id] = parent
         if matched_invoice:
-            matched_invoice_ids.add(matched_invoice.id)
-            cases.append({
-                "invoice": ExpenseWithImages.model_validate(matched_invoice).model_dump(),
-                "supplement": ExpenseWithImages.model_validate(sup).model_dump(),
-            })
+            # 原始憑證已不是 WAITING_RETURN（已被 finalizeCase 移出）→ 不再顯示
+            if matched_invoice.status != ExpenseStatus.WAITING_RETURN:
+                continue
+            key = str(matched_invoice.id)
+            if key not in cases_dict:
+                cases_dict[key] = {
+                    "invoice": ExpenseWithImages.model_validate(matched_invoice).model_dump(),
+                    "supplements": [],
+                }
+                matched_invoice_ids.add(matched_invoice.id)
+            cases_dict[key]["supplements"].append(
+                ExpenseWithImages.model_validate(sup).model_dump()
+            )
 
-    # Step 6：左側原始憑證若尚無對應補件，單獨列出（supplement=null）
+    # Step 6：左側原始憑證若尚無對應補件，單獨列出（supplements=[]）
     for inv in all_left_invoices:
         if inv.id not in matched_invoice_ids:
-            cases.append({
-                "invoice": ExpenseWithImages.model_validate(inv).model_dump(),
-                "supplement": None,
-            })
+            key = str(inv.id)
+            if key not in cases_dict:
+                cases_dict[key] = {
+                    "invoice": ExpenseWithImages.model_validate(inv).model_dump(),
+                    "supplements": [],
+                }
+
+    cases = list(cases_dict.values())
 
     wr_count = sum(1 for inv in invoice_by_id.values() if inv.status == ExpenseStatus.WAITING_RETURN)
 
@@ -382,6 +403,16 @@ def update_expense(
 @router.delete("/expenses/{expense_id}", status_code=204)
 def delete_expense(expense_id: uuid.UUID, db: Session = Depends(get_db)) -> None:
     """刪除單筆費用紀錄。"""
+    # Bug 2：刪除前確認無已配對子補件，避免補件變孤兒
+    child_supplements = list(db.scalars(
+        select(Expense).where(Expense.parent_id == expense_id)
+    ).all())
+    if child_supplements:
+        serials = "、".join(s.serial_number for s in child_supplements)
+        raise HTTPException(
+            status_code=400,
+            detail=f"此單據有已配對補件（{serials}），請先解除配對再刪除",
+        )
     deleted = expense_service.delete_expense(db, expense_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Expense not found")
