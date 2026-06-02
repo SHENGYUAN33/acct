@@ -60,12 +60,22 @@ SQLITE_TEST_URL = "sqlite:///file:integration_batch?mode=memory&cache=shared&uri
 
 
 def _init_sqlite_tables(conn) -> None:
-    """建立測試所需的所有表（手動 DDL，繞過 PostgreSQL 型別）。"""
+    """建立測試所需的所有表（手動 DDL，繞過 PostgreSQL 型別）。
+
+    注意：需與 models/ 下的 ORM 欄位保持同步。
+    每次新增 Alembic migration 若加了新表或新欄位，此處也要同步更新。
+    """
+    # 依外鍵依賴順序 DROP（子表先刪）
+    conn.execute(text("DROP TABLE IF EXISTS liff_session_images"))
+    conn.execute(text("DROP TABLE IF EXISTS liff_upload_sessions"))
     conn.execute(text("DROP TABLE IF EXISTS expense_images"))
     conn.execute(text("DROP TABLE IF EXISTS expenses"))
     conn.execute(text("DROP TABLE IF EXISTS user_states"))
     conn.execute(text("DROP TABLE IF EXISTS users"))
     conn.execute(text("DROP TABLE IF EXISTS admin_users"))
+    conn.execute(text("DROP TABLE IF EXISTS system_settings"))
+    conn.execute(text("DROP TABLE IF EXISTS staff_roster"))
+
     conn.execute(text("""
         CREATE TABLE users (
             id TEXT PRIMARY KEY,
@@ -113,6 +123,17 @@ def _init_sqlite_tables(conn) -> None:
             user_description TEXT,
             image_count INTEGER NOT NULL DEFAULT 1,
             voucher_categories TEXT,
+            voucher_subtypes TEXT,
+            expense_categories TEXT,
+            trigger_by TEXT,
+            group_id TEXT,
+            parent_id TEXT,
+            possible_duplicate_of TEXT,
+            relation_type TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            void_reason TEXT,
+            referenced_invoice_number TEXT,
+            display_order INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -124,8 +145,11 @@ def _init_sqlite_tables(conn) -> None:
             image_url TEXT NOT NULL,
             is_voucher INTEGER NOT NULL DEFAULT 0,
             voucher_category TEXT,
+            voucher_subtype TEXT,
+            expense_category TEXT,
             sequence_order INTEGER NOT NULL DEFAULT 1,
             ocr_result TEXT,
+            ocr_confidence NUMERIC(4,3),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """))
@@ -134,8 +158,51 @@ def _init_sqlite_tables(conn) -> None:
             id TEXT PRIMARY KEY,
             username TEXT UNIQUE NOT NULL,
             hashed_password TEXT NOT NULL,
+            employee_id TEXT,
             display_name TEXT,
             is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    conn.execute(text("""
+        CREATE TABLE system_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    conn.execute(text("""
+        CREATE TABLE staff_roster (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            department TEXT NOT NULL,
+            employee_id TEXT,
+            line_user_id TEXT,
+            is_bound INTEGER NOT NULL DEFAULT 0,
+            bound_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    conn.execute(text("""
+        CREATE TABLE liff_upload_sessions (
+            id TEXT PRIMARY KEY,
+            line_user_id TEXT NOT NULL,
+            user_id TEXT,
+            status TEXT NOT NULL DEFAULT 'uploading',
+            processing_status TEXT NOT NULL DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP NOT NULL
+        )
+    """))
+    conn.execute(text("""
+        CREATE TABLE liff_session_images (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            sequence_order INTEGER NOT NULL,
+            image_path TEXT NOT NULL,
+            is_voucher INTEGER,
+            manually_set INTEGER NOT NULL DEFAULT 0,
+            ocr_result TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """))

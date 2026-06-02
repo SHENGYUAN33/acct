@@ -1,0 +1,118 @@
+name: Stress Test (Manual Trigger)
+
+# 純手動觸發：部署前最後一道 SLA 確認關卡
+# 使用方式：
+#   gh workflow run stress-test.yml \
+#     -f target_url=https://staging.yourdomain.com \
+#     -f scenario=dashboard
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: '目標環境 URL（例：https://staging.yourdomain.com）'
+        required: true
+        type: string
+      scenario:
+        description: '測試情境'
+        required: true
+        default: 'dashboard'
+        type: choice
+        options:
+          - dashboard      # Dashboard 混合讀寫（一般部署前必跑）
+          - webhook        # LINE Webhook 並發（功能變更時跑）
+          - spike          # 突發流量（重大活動前跑）
+          - all            # 全部（正式上線前）
+      admin_user:
+        description: '管理員帳號（staging 環境）'
+        required: false
+        default: 'admin'
+        type: string
+
+env:
+  K6_VERSION: '0.54.0'
+
+jobs:
+  stress-test:
+    name: k6 Stress Test — ${{ inputs.scenario }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          curl -fsSL https://github.com/grafana/k6/releases/download/v${{ env.K6_VERSION }}/k6-v${{ env.K6_VERSION }}-linux-amd64.tar.gz \
+            | tar xz --strip-components=1 -C /usr/local/bin k6-v${{ env.K6_VERSION }}-linux-amd64/k6
+          k6 version
+
+      - name: Create results directory
+        run: mkdir -p k6-results
+
+      - name: Run Dashboard Load Test
+        if: inputs.scenario == 'dashboard' || inputs.scenario == 'all'
+        run: |
+          k6 run k6/dashboard_load.js \
+            -e BASE_URL=${{ inputs.target_url }} \
+            -e ADMIN_USER=${{ inputs.admin_user }} \
+            -e ADMIN_PASS=${{ secrets.STAGING_ADMIN_PASSWORD }} \
+            --out json=k6-results/dashboard_load_raw.json
+        continue-on-error: false  # SLA 未達 → 阻斷部署
+
+      - name: Run Webhook Concurrent Test
+        if: inputs.scenario == 'webhook' || inputs.scenario == 'all'
+        run: |
+          k6 run k6/webhook_concurrent.js \
+            -e BASE_URL=${{ inputs.target_url }} \
+            -e LINE_SECRET=${{ secrets.STAGING_LINE_CHANNEL_SECRET }} \
+            --out json=k6-results/webhook_concurrent_raw.json
+        continue-on-error: true  # Webhook 測試失敗不阻斷，僅記錄
+
+      - name: Run Spike Test
+        if: inputs.scenario == 'spike' || inputs.scenario == 'all'
+        run: |
+          k6 run k6/spike_test.js \
+            -e BASE_URL=${{ inputs.target_url }} \
+            -e ADMIN_USER=${{ inputs.admin_user }} \
+            -e ADMIN_PASS=${{ secrets.STAGING_ADMIN_PASSWORD }} \
+            --out json=k6-results/spike_test_raw.json
+        continue-on-error: true
+
+      - name: Upload k6 results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: k6-stress-results-${{ github.run_id }}
+          path: k6-results/
+          retention-days: 30
+
+      - name: Generate summary report
+        if: always()
+        run: |
+          echo "## k6 壓力測試結果 — ${{ inputs.scenario }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 指標 | 值 | 門檻 | 狀態 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-----|------|------|" >> $GITHUB_STEP_SUMMARY
+
+          for f in k6-results/*_summary.json; do
+            if [ -f "$f" ]; then
+              SCENARIO=$(basename $f _summary.json)
+              P95=$(cat $f | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          p95 = d.get('metrics', {}).get('http_req_duration', {}).get('values', {}).get('p(95)', 0)
+          print(f'{p95:.0f}')
+          " 2>/dev/null || echo "N/A")
+              ERR=$(cat $f | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          rate = d.get('metrics', {}).get('http_req_failed', {}).get('values', {}).get('rate', 0)
+          print(f'{rate*100:.2f}%')
+          " 2>/dev/null || echo "N/A")
+              echo "| $SCENARIO p95 | ${P95}ms | <500ms | $([ "$P95" != "N/A" ] && [ "$P95" -lt 500 ] && echo '✅' || echo '❌') |" >> $GITHUB_STEP_SUMMARY
+              echo "| $SCENARIO 錯誤率 | ${ERR} | <1% | $(echo "$ERR" | grep -E '^0\.' > /dev/null && echo '✅' || echo '❌') |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**目標環境**：${{ inputs.target_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**觸發者**：${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**觸發時間**：$(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_STEP_SUMMARY

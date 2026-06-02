@@ -54,6 +54,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_expenses_user_id'), table_name='expenses')
     op.drop_index(op.f('ix_expenses_status'), table_name='expenses')
     op.drop_table('expenses')
+    op.execute("DROP TYPE IF EXISTS expense_status")
     op.drop_index(op.f('ix_users_line_user_id'), table_name='users')
     op.drop_table('users')
     # ### end Alembic commands ###

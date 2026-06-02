@@ -30,8 +30,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run pytest
-        run: pytest tests/ --tb=short -q
+      - name: Run backend pytest (SQLite, ignore postgres-only tests)
+        run: pytest tests/ --ignore=tests/postgres/ --tb=short -q
         env:
           DATABASE_URL: sqlite:///file::memory:?cache=shared&uri=true
           LINE_CHANNEL_SECRET: test-secret-32chars-placeholder00
@@ -43,10 +43,82 @@ jobs:
           SCHEDULED_BATCH_TIMES: '["20:00"]'
           ENABLE_SCHEDULED_BATCH: "false"
 
-  # ── Job 2: 建置後端 Docker image 並推送 Artifact Registry ──────────
+      - name: Set up Node 20 (for frontend Vitest)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend unit tests (Vitest)
+        working-directory: frontend
+        run: npm test
+
+  # ── Job 2: PostgreSQL 整合測試 ─────────────────────────────────────
+  integration-test:
+    name: Integration Tests (PostgreSQL)
+    needs: test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: acctassist_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in $(seq 1 20); do
+            pg_isready -h localhost -p 5432 -U testuser && echo "PG ready" && break
+            echo "Waiting for PG... attempt $i"
+            sleep 2
+          done
+
+      - name: Run Alembic migrations on test DB
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+psycopg2://testuser:testpassword@localhost:5432/acctassist_test
+
+      - name: Run PostgreSQL integration tests
+        run: pytest tests/postgres/ -v --tb=short -q
+        env:
+          DATABASE_URL: postgresql+psycopg2://testuser:testpassword@localhost:5432/acctassist_test
+          LINE_CHANNEL_SECRET: test-secret-32chars-placeholder00
+          LINE_CHANNEL_ACCESS_TOKEN: test-token
+          GEMINI_API_KEY: test-key
+          JWT_SECRET: test-jwt-secret-for-ci-only-not-production
+          APP_ENV: development
+          SCHEDULED_BATCH_TIMEZONE: Asia/Taipei
+          SCHEDULED_BATCH_TIMES: '["20:00"]'
+          ENABLE_SCHEDULED_BATCH: "false"
+
+  # ── Job 3: 建置後端 Docker image 並推送 Artifact Registry ──────────
   build-backend:
     name: Build & Push Backend Image
-    needs: test
+    needs: [test, integration-test]
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.meta.outputs.image_tag }}
@@ -86,10 +158,10 @@ jobs:
           docker push "${{ steps.meta.outputs.image_tag }}"
           docker push "${{ steps.meta.outputs.image_latest }}"
 
-  # ── Job 3: 建置前端 Vue SPA ──────────────────────────────────────
+  # ── Job 4: 建置前端 Vue SPA ──────────────────────────────────────
   build-frontend:
     name: Build Frontend
-    needs: test
+    needs: [test, integration-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -127,7 +199,7 @@ jobs:
           path: frontend/dist/
           retention-days: 1
 
-  # ── Job 4: 部署到 GCP VM ──────────────────────────────────────────
+  # ── Job 5: 部署到 GCP VM ──────────────────────────────────────────
   deploy:
     name: Deploy to GCP VM
     needs: [build-backend, build-frontend]
