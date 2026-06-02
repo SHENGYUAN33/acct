@@ -111,20 +111,26 @@ def update_roster(
     body: RosterUpdate,
     db: Session = Depends(get_db),
 ) -> dict:
-    """修改員工名冊資料（只更新有傳入的欄位）。"""
-    # 若要更新 employee_id，檢查是否與其他記錄衝突
-    if body.employee_id:
+    """修改員工名冊資料（只更新有傳入的欄位）。
+
+    employee_id 明確傳入 null 表示清除；未傳入該欄位則不動原值。
+    """
+    # 若前端明確傳入非空的 employee_id，檢查是否與其他記錄衝突
+    if "employee_id" in body.model_fields_set and body.employee_id:
         existing = roster_service.get_roster_by_employee_id(db, body.employee_id)
         if existing and existing.id != roster_id:
             raise HTTPException(status_code=409, detail=f"員工編號「{body.employee_id}」已被其他記錄使用")
 
-    entry = roster_service.update_roster_entry(
-        db,
-        roster_id=roster_id,
-        name=body.name,
-        department=body.department,
-        employee_id=body.employee_id,
-    )
+    # 只把前端實際傳入的欄位送給 service（區分「未傳入」vs「明確 null 清除」）
+    kwargs: dict = {}
+    if "name" in body.model_fields_set:
+        kwargs["name"] = body.name
+    if "department" in body.model_fields_set:
+        kwargs["department"] = body.department
+    if "employee_id" in body.model_fields_set:
+        kwargs["employee_id"] = body.employee_id  # None = 清除
+
+    entry = roster_service.update_roster_entry(db, roster_id=roster_id, **kwargs)
     if entry is None:
         raise HTTPException(status_code=404, detail="找不到指定的員工名冊記錄")
 

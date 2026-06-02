@@ -15,6 +15,8 @@ from models.staff_roster import StaffRoster
 
 logger = logging.getLogger(__name__)
 
+_UNSET = object()  # sentinel：區分「未傳入」與「明確設為 None（清除）」
+
 
 def get_all_roster(
     db: Session,
@@ -118,18 +120,20 @@ def create_roster_entry(
 def update_roster_entry(
     db: Session,
     roster_id: UUID,
-    name: str | None = None,
-    department: str | None = None,
-    employee_id: str | None = None,
+    name: object = _UNSET,
+    department: object = _UNSET,
+    employee_id: object = _UNSET,
 ) -> StaffRoster | None:
     """修改員工名冊資料（只更新有傳入的欄位）。
+
+    employee_id 傳入 None 表示明確清除；未傳入（_UNSET）則不動原值。
 
     Args:
         db: SQLAlchemy Session。
         roster_id: 目標記錄的 UUID。
-        name: 新的真實姓名（選填）。
-        department: 新的所屬組別（選填）。
-        employee_id: 新的員工編號（選填）。
+        name: 新的真實姓名；_UNSET 表示不更新。
+        department: 新的所屬組別；_UNSET 表示不更新。
+        employee_id: 新的員工編號；None 表示清除；_UNSET 表示不更新。
 
     Returns:
         更新後的 StaffRoster 實例；找不到則回傳 None。
@@ -138,12 +142,12 @@ def update_roster_entry(
     if entry is None:
         return None
 
-    if name is not None:
-        entry.name = name
-    if department is not None:
-        entry.department = department
-    if employee_id is not None:
-        entry.employee_id = employee_id
+    if name is not _UNSET:
+        entry.name = name  # type: ignore[assignment]
+    if department is not _UNSET:
+        entry.department = department  # type: ignore[assignment]
+    if employee_id is not _UNSET:
+        entry.employee_id = employee_id  # type: ignore[assignment]  None = 清除
 
     db.commit()
     db.refresh(entry)
@@ -199,8 +203,10 @@ def bind_line_user_by_name(
     Returns:
         唯一匹配回傳 StaffRoster；多筆同名回傳 list；找不到回傳 None。
     """
+    name = name.strip()
+    # FOR UPDATE 確保同名同時綁定時，第二個請求等第一個 commit 後才看到最新 is_bound 狀態
     all_matches: list[StaffRoster] = list(
-        db.scalars(select(StaffRoster).where(StaffRoster.name == name))
+        db.scalars(select(StaffRoster).where(StaffRoster.name == name).with_for_update())
     )
 
     if not all_matches:
@@ -251,6 +257,7 @@ def bind_line_user(
 
     查詢 employee_id → 設定 line_user_id / is_bound=True / bound_at=now()。
     找不到 employee_id 則回傳 None（不拋例外）。
+    若此 line_user_id 已綁定至同一筆記錄，視為冪等操作直接回傳（不覆寫 bound_at）。
 
     Args:
         db: SQLAlchemy Session。
@@ -267,6 +274,14 @@ def bind_line_user(
             employee_id,
         )
         return None
+
+    # 冪等：同一個 line_user_id 已綁定至此記錄，直接回傳
+    if entry.line_user_id == line_user_id:
+        logger.info(
+            "roster_service.bind_line_user: employee_id=%s already bound to same UID, idempotent",
+            employee_id,
+        )
+        return entry
 
     entry.line_user_id = line_user_id
     entry.is_bound = True

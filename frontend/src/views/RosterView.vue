@@ -54,8 +54,32 @@ const unbindTarget = ref(null)    // { id, name }
 const showUnbindConfirm = ref(false)
 const isUnbinding = ref(false)
 
+// ── CSV 匯入結果 Modal ────────────────────────────────────────────
+const showImportResult = ref(false)
+const importResultData = ref(null)  // { created, updated, errors: [{row, reason}] }
+
 // ── Computed ─────────────────────────────────────────────────────
 const totalPages = computed(() => Math.max(1, Math.ceil(totalCount.value / pageSize.value)))
+
+// 分頁按鈕清單（含省略號）；數字為 1-based 頁碼，'...' 為分隔符
+const pageButtons = computed(() => {
+  const total = totalPages.value
+  const cur = currentPage.value + 1  // 轉為 1-based
+
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+
+  const show = new Set([1, total, cur])
+  if (cur > 1) show.add(cur - 1)
+  if (cur < total) show.add(cur + 1)
+
+  const sorted = [...show].sort((a, b) => a - b)
+  const result = []
+  for (let i = 0; i < sorted.length; i++) {
+    if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.push('...')
+    result.push(sorted[i])
+  }
+  return result
+})
 
 // ── Toast 工具 ────────────────────────────────────────────────────
 function showToast(type, message, duration = 4000) {
@@ -134,8 +158,9 @@ async function handleSave() {
     const payload = {
       name: form.value.name.trim(),
       department: form.value.department,
+      // 始終送出 employee_id：有值則更新，空字串轉 null 表示清除
+      employee_id: form.value.employee_id.trim() || null,
     }
-    if (form.value.employee_id.trim()) payload.employee_id = form.value.employee_id.trim()
 
     if (isEditMode.value) {
       await updateRosterEntry(editingId.value, payload)
@@ -220,15 +245,12 @@ async function handleFileSelected(event) {
   try {
     const res = await importRosterCSV(file)
     const data = res.data?.data || {}
-    const created = data.created ?? 0
-    const updated = data.updated ?? 0
-    const errors = data.errors ?? []  // errors 是陣列（list[dict]）
-
-    if (errors.length > 0) {
-      showToast('warn', `⚠️ 匯入完成，但有 ${errors.length} 筆錯誤（新增 ${created} 筆，更新 ${updated} 筆）`, 6000)
-    } else {
-      showToast('success', `✅ 匯入完成：新增 ${created} 筆，更新 ${updated} 筆`)
+    importResultData.value = {
+      created: data.created ?? 0,
+      updated: data.updated ?? 0,
+      errors: data.errors ?? [],
     }
+    showImportResult.value = true
     await fetchRoster(0)
   } catch (err) {
     const detail = err.response?.data?.detail || err.response?.data?.message || 'CSV 匯入失敗，請確認格式是否正確'
@@ -243,7 +265,9 @@ async function handleFileSelected(event) {
 function formatDate(dateStr) {
   if (!dateStr) return '—'
   try {
-    const d = new Date(dateStr)
+    // 若字串不帶時區資訊，補上 Z（視為 UTC）以確保本地時間轉換正確
+    const normalized = /[Zz]|[+-]\d{2}:?\d{2}$/.test(dateStr) ? dateStr : dateStr + 'Z'
+    const d = new Date(normalized)
     const y = d.getFullYear()
     const m = String(d.getMonth() + 1).padStart(2, '0')
     const day = String(d.getDate()).padStart(2, '0')
@@ -436,7 +460,7 @@ onMounted(() => fetchRoster(0))
             <span class="text-gray-400 ml-2">共 {{ totalCount }} 筆</span>
           </div>
 
-          <!-- 右側：頁碼 -->
+          <!-- 右側：頁碼（含省略號） -->
           <div class="flex items-center gap-1">
             <button
               @click="goToPage(currentPage - 1)"
@@ -444,14 +468,19 @@ onMounted(() => fetchRoster(0))
               class="w-7 h-7 flex items-center justify-center rounded border border-gray-300 text-gray-500 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-xs"
             >‹</button>
 
-            <template v-for="p in totalPages" :key="p">
+            <template v-for="(item, idx) in pageButtons" :key="idx">
+              <span
+                v-if="item === '...'"
+                class="w-7 h-7 flex items-center justify-center text-gray-400 text-xs select-none"
+              >…</span>
               <button
-                @click="goToPage(p - 1)"
+                v-else
+                @click="goToPage(item - 1)"
                 class="w-7 h-7 flex items-center justify-center rounded border text-xs transition-colors"
-                :class="currentPage === p - 1
+                :class="currentPage === item - 1
                   ? 'bg-blue-500 border-blue-500 text-white font-medium'
                   : 'border-gray-300 text-gray-600 hover:bg-gray-100'"
-              >{{ p }}</button>
+              >{{ item }}</button>
             </template>
 
             <button
@@ -572,6 +601,71 @@ onMounted(() => fetchRoster(0))
       @confirm="handleUnbind"
       @cancel="showUnbindConfirm = false"
     />
+
+    <!-- ── CSV 匯入結果 Modal ────────────────────────────────── -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div
+          v-if="showImportResult && importResultData"
+          class="fixed inset-0 z-50 flex items-center justify-center"
+          aria-modal="true"
+          role="dialog"
+        >
+          <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="showImportResult = false" />
+          <div class="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-lg mx-4">
+            <h3 class="text-gray-900 font-semibold text-lg mb-4">CSV 匯入結果</h3>
+
+            <!-- 統計摘要 -->
+            <div class="flex gap-4 mb-4">
+              <div class="flex-1 bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-center">
+                <div class="text-xl font-bold text-green-700">{{ importResultData.created }}</div>
+                <div class="text-xs text-green-600 mt-0.5">新增</div>
+              </div>
+              <div class="flex-1 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-center">
+                <div class="text-xl font-bold text-blue-700">{{ importResultData.updated }}</div>
+                <div class="text-xs text-blue-600 mt-0.5">更新</div>
+              </div>
+              <div class="flex-1 rounded-lg px-3 py-2 text-center"
+                :class="importResultData.errors.length > 0
+                  ? 'bg-red-50 border border-red-200'
+                  : 'bg-gray-50 border border-gray-200'"
+              >
+                <div class="text-xl font-bold"
+                  :class="importResultData.errors.length > 0 ? 'text-red-600' : 'text-gray-400'"
+                >{{ importResultData.errors.length }}</div>
+                <div class="text-xs mt-0.5"
+                  :class="importResultData.errors.length > 0 ? 'text-red-500' : 'text-gray-400'"
+                >錯誤</div>
+              </div>
+            </div>
+
+            <!-- 錯誤明細（有錯誤才顯示） -->
+            <div v-if="importResultData.errors.length > 0">
+              <p class="text-sm font-medium text-red-600 mb-2">錯誤明細：</p>
+              <ul class="max-h-48 overflow-y-auto space-y-1 border border-red-100 rounded-lg p-2 bg-red-50">
+                <li
+                  v-for="err in importResultData.errors"
+                  :key="err.row"
+                  class="text-xs text-red-700 flex gap-2"
+                >
+                  <span class="font-mono text-red-400 shrink-0">第 {{ err.row }} 行</span>
+                  <span>{{ err.reason }}</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="mt-5 flex justify-end">
+              <button
+                @click="showImportResult = false"
+                class="px-4 py-2 rounded-lg bg-gray-900 hover:bg-gray-700 text-white text-sm font-medium transition-colors"
+              >
+                確認
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
   </div>
 </template>
