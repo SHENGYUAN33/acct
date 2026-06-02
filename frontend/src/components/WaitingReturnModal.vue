@@ -1,6 +1,6 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { X, Loader2, PackageX, CheckCircle2, ChevronRight, ChevronDown, Search, Link2, Unlink2, Trash2 } from 'lucide-vue-next'
+import { ref, reactive, computed, onMounted } from 'vue'
+import { X, Loader2, PackageX, CheckCircle2, ChevronRight, ChevronDown, Search, Link2, Unlink2, Trash2, SlidersHorizontal } from 'lucide-vue-next'
 import { fetchWaitingReturns, fetchExpenses, fetchRelatedExpenses, updateExpense, deleteExpense, pairExpense } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
 import { API_BASE_URL } from '../utils/axios'
@@ -8,6 +8,12 @@ import { API_BASE_URL } from '../utils/axios'
 const emit = defineEmits(['close', 'count-changed'])
 
 const BACKEND_BASE = API_BASE_URL
+
+const VOUCHER_CATEGORY_LABEL = {
+  INVOICE: '電子發票', RECEIPT: '收據', TRANSPORTATION: '交通票據',
+  LABOR_SERVICE: '勞務服務', INSURANCE: '保險', RENTAL: '租金',
+  ACCOMMODATION: '住宿', UTILITY: '水電費', POSTAGE: '郵寄費用',
+}
 
 // ── 資料 ───────────────────────────────────────────────────────────
 const isLoading = ref(true)
@@ -38,6 +44,31 @@ const isLeftSearching = ref(false)
 const leftSearchResults = ref([])
 const showLeftSearch = ref(false)
 
+// ── 進階篩選：組別選項（動態從報帳資料載入）──────────────────────────
+const availableDepts = ref([])
+
+// ── 左欄：進階多條件篩選（新增，獨立於原有單一搜尋）─────────────────
+const showLeftFilter = ref(false)
+const leftFilter = reactive({
+  serial_number: '', invoice_number: '', uploader_name: '',
+  uploader_dept: '', date_from: '', date_to: '',
+  amount_min: '', amount_max: '', voucher_category: '',
+})
+const isLeftFilterSearching = ref(false)
+const leftFilterResults = ref([])
+const leftActiveCount = computed(() => Object.values(leftFilter).filter(v => v !== '').length)
+
+// ── 右欄：進階多條件篩選（新增，獨立於原有單一搜尋）─────────────────
+const showRightFilter = ref(false)
+const rightFilter = reactive({
+  serial_number: '', invoice_number: '', uploader_name: '',
+  uploader_dept: '', date_from: '', date_to: '',
+  amount_min: '', amount_max: '', voucher_category: '',
+})
+const isRightFilterSearching = ref(false)
+const rightFilterResults = ref([])
+const rightActiveCount = computed(() => Object.values(rightFilter).filter(v => v !== '').length)
+
 // ── 燈箱 ───────────────────────────────────────────────────────────
 const lightboxUrl = ref(null)
 function openLightbox(url) { lightboxUrl.value = url }
@@ -59,8 +90,9 @@ function imgUrl(url) {
   return url.startsWith('http') ? url : `${BACKEND_BASE}/${url}`
 }
 
-// ── 右欄顯示（搜尋中顯示搜尋結果，否則顯示孤立補件）────────────────
+// ── 右欄顯示（進階篩選結果 > 簡易搜尋結果 > 孤立補件）──────────────
 const rightPanelItems = computed(() => {
+  if (rightActiveCount.value > 0 && rightFilterResults.value.length > 0) return rightFilterResults.value
   if (searchQuery.value.trim() && searchResults.value.length > 0) return searchResults.value
   return orphanSupplements.value
 })
@@ -82,6 +114,17 @@ async function loadData() {
   }
 }
 onMounted(loadData)
+
+// ── 載入組別選項（Modal 開啟時從現有報帳資料萃取去重）────────────────
+async function loadAvailableDepts() {
+  try {
+    const res = await fetchExpenses({ page_size: 200 })
+    const items = res.data?.data?.items ?? []
+    const depts = [...new Set(items.map(e => e.uploader_dept).filter(Boolean))].sort()
+    availableDepts.value = depts
+  } catch { /* 靜默失敗，組別下拉維持空陣列 */ }
+}
+onMounted(loadAvailableDepts)
 
 // ── 左欄：手風琴展開 ───────────────────────────────────────────────
 function toggleExpand(invoiceId) {
@@ -239,6 +282,68 @@ async function addToLeftPanel(expense) {
   emit('count-changed')
 }
 
+// ── 左欄：進階多條件篩選搜尋（新增，原有 searchLeftPanel 保留不動）───
+async function searchLeftPanelAdvanced() {
+  if (leftActiveCount.value === 0) { leftFilterResults.value = []; return }
+  isLeftFilterSearching.value = true
+  try {
+    const params = { page_size: 50 }
+    if (leftFilter.serial_number) params.serial_number_q = leftFilter.serial_number
+    if (leftFilter.invoice_number) params.invoice_number_q = leftFilter.invoice_number
+    if (leftFilter.uploader_name) params.uploader_name_q = leftFilter.uploader_name
+    if (leftFilter.uploader_dept) params.uploader_dept_q = leftFilter.uploader_dept
+    if (leftFilter.date_from) params.date_from = leftFilter.date_from
+    if (leftFilter.date_to) params.date_to = leftFilter.date_to
+    if (leftFilter.amount_min !== '') params.amount_min = leftFilter.amount_min
+    if (leftFilter.amount_max !== '') params.amount_max = leftFilter.amount_max
+    if (leftFilter.voucher_category) params.voucher_category_q = leftFilter.voucher_category
+    const res = await fetchExpenses(params)
+    const existingIds = new Set(cases.value.map(c => c.invoice.id))
+    leftFilterResults.value = (res.data?.data?.items ?? []).filter(e => !existingIds.has(e.id))
+  } catch {
+    toast.error('篩選搜尋失敗')
+    leftFilterResults.value = []
+  } finally {
+    isLeftFilterSearching.value = false
+  }
+}
+
+function clearLeftFilter() {
+  Object.keys(leftFilter).forEach(k => { leftFilter[k] = '' })
+  leftFilterResults.value = []
+}
+
+// ── 右欄：進階多條件篩選搜尋（新增，原有 searchSupplements 保留不動）─
+async function searchSupplementsAdvanced() {
+  if (rightActiveCount.value === 0) { rightFilterResults.value = []; return }
+  isRightFilterSearching.value = true
+  try {
+    const params = { page_size: 100 }
+    if (rightFilter.serial_number) params.serial_number_q = rightFilter.serial_number
+    if (rightFilter.invoice_number) params.invoice_number_q = rightFilter.invoice_number
+    if (rightFilter.uploader_name) params.uploader_name_q = rightFilter.uploader_name
+    if (rightFilter.uploader_dept) params.uploader_dept_q = rightFilter.uploader_dept
+    if (rightFilter.date_from) params.date_from = rightFilter.date_from
+    if (rightFilter.date_to) params.date_to = rightFilter.date_to
+    if (rightFilter.amount_min !== '') params.amount_min = rightFilter.amount_min
+    if (rightFilter.amount_max !== '') params.amount_max = rightFilter.amount_max
+    if (rightFilter.voucher_category) params.voucher_category_q = rightFilter.voucher_category
+    const res = await fetchExpenses(params)
+    rightFilterResults.value = (res.data?.data?.items ?? [])
+      .filter(e => ['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE'].includes(e.relation_type))
+  } catch {
+    toast.error('篩選搜尋失敗')
+    rightFilterResults.value = []
+  } finally {
+    isRightFilterSearching.value = false
+  }
+}
+
+function clearRightFilter() {
+  Object.keys(rightFilter).forEach(k => { rightFilter[k] = '' })
+  rightFilterResults.value = []
+}
+
 // ── 案件層級確認完成：所有補件 → COMPLETED，憑證 → PENDING ──────────
 // 確保無論補件個別狀態為何，都能一鍵將案件移出待退貨管理
 async function finalizeCase(item) {
@@ -340,46 +445,149 @@ async function unlinkSupplement(supplement, invoice) {
         <!-- ── 左欄：待退貨憑證清單 ── -->
         <div class="w-[58%] border-r border-gray-100 flex flex-col min-h-0">
 
-          <!-- 手動加入原始交易 -->
-          <div class="shrink-0 px-3 pt-2 pb-1.5 border-b border-gray-100">
-            <button
-              @click="showLeftSearch = !showLeftSearch"
-              class="text-[11px] text-purple-500 hover:text-purple-700 flex items-center gap-1"
-            >
-              <span>{{ showLeftSearch ? '▲' : '▼' }}</span>
-              手動加入原始交易至左側
-            </button>
-            <div v-if="showLeftSearch" class="mt-1.5 space-y-1">
-              <div class="flex gap-1">
-                <input
-                  v-model="leftSearchQuery"
-                  @keyup.enter="searchLeftPanel"
-                  placeholder="EXP編號 / 發票號碼 / 上傳者..."
-                  class="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400"
-                />
-                <button
-                  @click="searchLeftPanel"
-                  :disabled="isLeftSearching"
-                  class="flex items-center gap-1 px-2.5 py-1.5 bg-purple-500 hover:bg-purple-600 text-white text-xs rounded-lg disabled:opacity-50 transition-colors"
-                >
-                  <Loader2 v-if="isLeftSearching" :size="11" class="animate-spin" />
+          <!-- 進階多條件篩選（Popover Pattern） -->
+          <div class="shrink-0 px-3 py-2 border-b border-gray-100 relative">
+
+            <!-- Toolbar: 篩選按鈕 + active chips -->
+            <div class="flex items-center gap-1.5 flex-wrap min-h-[28px]">
+              <button
+                @click="showLeftFilter = !showLeftFilter"
+                class="flex items-center gap-1 px-2 py-1 text-xs border rounded-lg transition-colors shrink-0"
+                :class="showLeftFilter || leftActiveCount > 0
+                  ? 'border-purple-300 bg-purple-50 text-purple-600'
+                  : 'border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600'"
+              >
+                <SlidersHorizontal :size="11" />
+                <span>篩選</span>
+                <span v-if="leftActiveCount > 0"
+                  class="ml-0.5 inline-flex items-center justify-center w-4 h-4 bg-purple-500 text-white rounded-full text-[9px] font-bold">
+                  {{ leftActiveCount }}
+                </span>
+              </button>
+
+              <span v-if="leftFilter.serial_number"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
+                EXP: {{ leftFilter.serial_number }}
+                <button @click="leftFilter.serial_number = ''; searchLeftPanelAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+              </span>
+              <span v-if="leftFilter.invoice_number"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
+                發票: {{ leftFilter.invoice_number }}
+                <button @click="leftFilter.invoice_number = ''; searchLeftPanelAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+              </span>
+              <span v-if="leftFilter.uploader_name"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
+                {{ leftFilter.uploader_name }}
+                <button @click="leftFilter.uploader_name = ''; searchLeftPanelAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+              </span>
+              <span v-if="leftFilter.uploader_dept"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
+                {{ leftFilter.uploader_dept }}
+                <button @click="leftFilter.uploader_dept = ''; searchLeftPanelAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+              </span>
+              <span v-if="leftFilter.date_from || leftFilter.date_to"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
+                {{ leftFilter.date_from || '起' }} ～ {{ leftFilter.date_to || '今' }}
+                <button @click="leftFilter.date_from = ''; leftFilter.date_to = ''; searchLeftPanelAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+              </span>
+              <span v-if="leftFilter.amount_min !== '' || leftFilter.amount_max !== ''"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
+                NT${{ leftFilter.amount_min || '0' }}～{{ leftFilter.amount_max || '∞' }}
+                <button @click="leftFilter.amount_min = ''; leftFilter.amount_max = ''; searchLeftPanelAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+              </span>
+              <span v-if="leftFilter.voucher_category"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
+                {{ VOUCHER_CATEGORY_LABEL[leftFilter.voucher_category] ?? leftFilter.voucher_category }}
+                <button @click="leftFilter.voucher_category = ''; searchLeftPanelAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+              </span>
+
+              <button v-if="leftActiveCount > 0" @click="clearLeftFilter"
+                class="text-[10px] text-gray-400 hover:text-gray-600 ml-auto shrink-0">
+                清除全部
+              </button>
+            </div>
+
+            <!-- Popover panel -->
+            <div v-if="showLeftFilter"
+              class="absolute left-0 top-full mt-1 z-30 w-72 bg-white border border-gray-200 rounded-xl shadow-xl p-3 space-y-1.5">
+              <div class="grid grid-cols-2 gap-1">
+                <input v-model="leftFilter.serial_number" @keyup.enter="searchLeftPanelAdvanced"
+                  placeholder="EXP編號"
+                  class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+                <input v-model="leftFilter.invoice_number" @keyup.enter="searchLeftPanelAdvanced"
+                  placeholder="發票號碼"
+                  class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+              </div>
+              <div class="grid grid-cols-2 gap-1">
+                <input v-model="leftFilter.uploader_name" @keyup.enter="searchLeftPanelAdvanced"
+                  placeholder="上傳者姓名"
+                  class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+                <select v-model="leftFilter.uploader_dept"
+                  class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400 bg-white">
+                  <option value="">全部組別</option>
+                  <option v-for="dept in availableDepts" :key="dept" :value="dept">{{ dept }}</option>
+                </select>
+              </div>
+              <div class="flex items-center gap-1">
+                <input type="date" v-model="leftFilter.date_from"
+                  class="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+                <span class="text-gray-400 text-xs shrink-0">～</span>
+                <input type="date" v-model="leftFilter.date_to"
+                  class="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+              </div>
+              <div class="flex items-center gap-1">
+                <input type="number" v-model="leftFilter.amount_min" placeholder="最低金額"
+                  class="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+                <span class="text-gray-400 text-xs shrink-0">～</span>
+                <input type="number" v-model="leftFilter.amount_max" placeholder="最高金額"
+                  class="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+                <span class="text-gray-400 text-[10px] shrink-0">NT$</span>
+              </div>
+              <select v-model="leftFilter.voucher_category"
+                class="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400 bg-white">
+                <option value="">全部憑證類別</option>
+                <option value="INVOICE">電子發票</option>
+                <option value="RECEIPT">收據</option>
+                <option value="TRANSPORTATION">交通票據</option>
+                <option value="LABOR_SERVICE">勞務服務</option>
+                <option value="INSURANCE">保險</option>
+                <option value="RENTAL">租金</option>
+                <option value="ACCOMMODATION">住宿</option>
+                <option value="UTILITY">水電費</option>
+                <option value="POSTAGE">郵寄費用</option>
+              </select>
+              <div class="flex gap-1 pt-0.5">
+                <button @click="searchLeftPanelAdvanced(); showLeftFilter = false"
+                  :disabled="isLeftFilterSearching || leftActiveCount === 0"
+                  class="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 bg-purple-500 hover:bg-purple-600 text-white text-xs rounded-lg disabled:opacity-50 transition-colors">
+                  <Loader2 v-if="isLeftFilterSearching" :size="11" class="animate-spin" />
                   <Search v-else :size="11" />
+                  {{ isLeftFilterSearching ? '搜尋中...' : '套用篩選' }}
+                </button>
+                <button @click="clearLeftFilter(); showLeftFilter = false"
+                  class="px-2.5 py-1.5 border border-gray-200 text-gray-400 hover:text-gray-600 text-xs rounded-lg transition-colors">
+                  清除
                 </button>
               </div>
-              <div v-if="leftSearchResults.length" class="bg-white border border-gray-200 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
-                <div
-                  v-for="exp in leftSearchResults"
-                  :key="exp.id"
-                  @click="addToLeftPanel(exp)"
-                  class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-purple-50 border-b border-gray-100 last:border-0"
-                >
-                  <span class="font-mono text-[11px] text-gray-800">{{ exp.serial_number }}</span>
-                  <span v-if="exp.invoice_number" class="text-[10px] font-mono text-gray-400">{{ exp.invoice_number }}</span>
-                  <span class="text-[10px] text-gray-500 truncate">{{ exp.uploader_name }}</span>
-                  <span class="ml-auto text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded">加入</span>
-                </div>
+            </div>
+
+            <!-- 篩選結果列表 -->
+            <div v-if="leftFilterResults.length"
+              class="mt-1.5 bg-white border border-gray-200 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
+              <div v-for="exp in leftFilterResults" :key="exp.id"
+                @click="addToLeftPanel(exp)"
+                class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-purple-50 border-b border-gray-100 last:border-0">
+                <span class="font-mono text-[11px] text-gray-800">{{ exp.serial_number }}</span>
+                <span v-if="exp.invoice_number" class="text-[10px] font-mono text-gray-400">{{ exp.invoice_number }}</span>
+                <span class="text-[10px] text-gray-500 truncate">{{ exp.uploader_name }}</span>
+                <span v-if="exp.total_amount != null" class="text-[10px] text-gray-500 shrink-0">
+                  NT${{ Number(exp.total_amount).toLocaleString() }}
+                </span>
+                <span class="ml-auto text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded shrink-0">加入</span>
               </div>
             </div>
+            <p v-if="leftActiveCount > 0 && leftFilterResults.length === 0 && !isLeftFilterSearching && !showLeftFilter"
+              class="text-[10px] text-gray-400 text-center py-1">點擊「套用篩選」執行搜尋</p>
           </div>
 
           <div class="flex-1 overflow-y-auto">
@@ -553,33 +761,141 @@ async function unlinkSupplement(supplement, invoice) {
         <!-- ── 右欄：補件物品照池 ── -->
         <div class="w-[42%] flex flex-col min-h-0">
 
-          <!-- 搜尋欄 -->
-          <div class="shrink-0 px-4 pt-3 pb-2 border-b border-gray-100 space-y-2">
-            <p class="text-[11px] font-medium text-gray-500">待配對補件（拖曳至左側憑證以配對）</p>
-            <div class="flex gap-1.5">
-              <input
-                v-model="searchQuery"
-                @keyup.enter="searchSupplements"
-                placeholder="輸入上傳者姓名搜尋..."
-                class="flex-1 text-xs px-2.5 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400 bg-white"
-              />
+          <!-- 右欄標題 + 篩選（Popover Pattern） -->
+          <div class="shrink-0 px-4 pt-3 pb-2 border-b border-gray-100 relative">
+
+            <!-- 標題列 + 篩選按鈕 -->
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <p class="text-[11px] font-medium text-gray-600">
+                  待配對補件
+                  <span class="font-normal text-gray-300 ml-0.5">— 拖曳至左側憑證以配對</span>
+                </p>
+                <p class="text-[10px] text-gray-400 mt-0.5">
+                  {{ rightActiveCount > 0 ? `篩選結果（${rightPanelItems.length} 筆）` : `孤立補件（${orphanSupplements.length} 筆）` }}
+                </p>
+              </div>
               <button
-                @click="searchSupplements"
-                :disabled="isSearching"
-                class="flex items-center gap-1 px-2.5 py-1.5 bg-purple-500 hover:bg-purple-600 text-white text-xs rounded-lg disabled:opacity-50 transition-colors"
+                @click="showRightFilter = !showRightFilter"
+                class="flex items-center gap-1 px-2 py-1 text-xs border rounded-lg transition-colors shrink-0"
+                :class="showRightFilter || rightActiveCount > 0
+                  ? 'border-purple-300 bg-purple-50 text-purple-600'
+                  : 'border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600'"
               >
-                <Loader2 v-if="isSearching" :size="12" class="animate-spin" />
-                <Search v-else :size="12" />
+                <SlidersHorizontal :size="11" />
+                <span>篩選</span>
+                <span v-if="rightActiveCount > 0"
+                  class="ml-0.5 inline-flex items-center justify-center w-4 h-4 bg-purple-500 text-white rounded-full text-[9px] font-bold">
+                  {{ rightActiveCount }}
+                </span>
               </button>
-              <button
-                v-if="searchQuery"
-                @click="clearSearch"
-                class="px-2 py-1.5 border border-gray-200 text-gray-400 hover:text-gray-600 text-xs rounded-lg transition-colors"
-              >×</button>
             </div>
-            <p class="text-[10px] text-gray-400">
-              {{ searchQuery.trim() ? `搜尋結果（${rightPanelItems.length} 筆）` : `孤立補件（${orphanSupplements.length} 筆）` }}
-            </p>
+
+            <!-- Active chips -->
+            <div v-if="rightActiveCount > 0" class="flex flex-wrap gap-1 mt-1.5">
+              <span v-if="rightFilter.serial_number"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
+                EXP: {{ rightFilter.serial_number }}
+                <button @click="rightFilter.serial_number = ''; searchSupplementsAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+              </span>
+              <span v-if="rightFilter.invoice_number"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
+                發票: {{ rightFilter.invoice_number }}
+                <button @click="rightFilter.invoice_number = ''; searchSupplementsAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+              </span>
+              <span v-if="rightFilter.uploader_name"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
+                {{ rightFilter.uploader_name }}
+                <button @click="rightFilter.uploader_name = ''; searchSupplementsAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+              </span>
+              <span v-if="rightFilter.uploader_dept"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
+                {{ rightFilter.uploader_dept }}
+                <button @click="rightFilter.uploader_dept = ''; searchSupplementsAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+              </span>
+              <span v-if="rightFilter.date_from || rightFilter.date_to"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
+                {{ rightFilter.date_from || '起' }} ～ {{ rightFilter.date_to || '今' }}
+                <button @click="rightFilter.date_from = ''; rightFilter.date_to = ''; searchSupplementsAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+              </span>
+              <span v-if="rightFilter.amount_min !== '' || rightFilter.amount_max !== ''"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
+                NT${{ rightFilter.amount_min || '0' }}～{{ rightFilter.amount_max || '∞' }}
+                <button @click="rightFilter.amount_min = ''; rightFilter.amount_max = ''; searchSupplementsAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+              </span>
+              <span v-if="rightFilter.voucher_category"
+                class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
+                {{ VOUCHER_CATEGORY_LABEL[rightFilter.voucher_category] ?? rightFilter.voucher_category }}
+                <button @click="rightFilter.voucher_category = ''; searchSupplementsAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+              </span>
+              <button @click="clearRightFilter" class="text-[10px] text-gray-400 hover:text-gray-600 ml-auto shrink-0">
+                清除全部
+              </button>
+            </div>
+
+            <!-- Popover panel（右對齊） -->
+            <div v-if="showRightFilter"
+              class="absolute right-4 top-full mt-1 z-30 w-72 bg-white border border-gray-200 rounded-xl shadow-xl p-3 space-y-1.5">
+              <div class="grid grid-cols-2 gap-1">
+                <input v-model="rightFilter.serial_number" @keyup.enter="searchSupplementsAdvanced"
+                  placeholder="EXP編號"
+                  class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+                <input v-model="rightFilter.invoice_number" @keyup.enter="searchSupplementsAdvanced"
+                  placeholder="發票號碼"
+                  class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+              </div>
+              <div class="grid grid-cols-2 gap-1">
+                <input v-model="rightFilter.uploader_name" @keyup.enter="searchSupplementsAdvanced"
+                  placeholder="上傳者姓名"
+                  class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+                <select v-model="rightFilter.uploader_dept"
+                  class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400 bg-white">
+                  <option value="">全部組別</option>
+                  <option v-for="dept in availableDepts" :key="dept" :value="dept">{{ dept }}</option>
+                </select>
+              </div>
+              <div class="flex items-center gap-1">
+                <input type="date" v-model="rightFilter.date_from"
+                  class="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+                <span class="text-gray-400 text-xs shrink-0">～</span>
+                <input type="date" v-model="rightFilter.date_to"
+                  class="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+              </div>
+              <div class="flex items-center gap-1">
+                <input type="number" v-model="rightFilter.amount_min" placeholder="最低金額"
+                  class="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+                <span class="text-gray-400 text-xs shrink-0">～</span>
+                <input type="number" v-model="rightFilter.amount_max" placeholder="最高金額"
+                  class="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+                <span class="text-gray-400 text-[10px] shrink-0">NT$</span>
+              </div>
+              <select v-model="rightFilter.voucher_category"
+                class="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400 bg-white">
+                <option value="">全部憑證類別</option>
+                <option value="INVOICE">電子發票</option>
+                <option value="RECEIPT">收據</option>
+                <option value="TRANSPORTATION">交通票據</option>
+                <option value="LABOR_SERVICE">勞務服務</option>
+                <option value="INSURANCE">保險</option>
+                <option value="RENTAL">租金</option>
+                <option value="ACCOMMODATION">住宿</option>
+                <option value="UTILITY">水電費</option>
+                <option value="POSTAGE">郵寄費用</option>
+              </select>
+              <div class="flex gap-1 pt-0.5">
+                <button @click="searchSupplementsAdvanced(); showRightFilter = false"
+                  :disabled="isRightFilterSearching || rightActiveCount === 0"
+                  class="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 bg-purple-500 hover:bg-purple-600 text-white text-xs rounded-lg disabled:opacity-50 transition-colors">
+                  <Loader2 v-if="isRightFilterSearching" :size="11" class="animate-spin" />
+                  <Search v-else :size="11" />
+                  {{ isRightFilterSearching ? '搜尋中...' : '套用篩選' }}
+                </button>
+                <button @click="clearRightFilter(); showRightFilter = false"
+                  class="px-2.5 py-1.5 border border-gray-200 text-gray-400 hover:text-gray-600 text-xs rounded-lg transition-colors">
+                  清除
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- 補件卡片清單 -->
@@ -589,7 +905,8 @@ async function unlinkSupplement(supplement, invoice) {
             <div v-if="rightPanelItems.length === 0"
               class="flex flex-col items-center justify-center h-full text-gray-300 text-xs gap-2">
               <PackageX :size="28" class="opacity-40" />
-              <span v-if="searchQuery.trim()">未找到符合的補件</span>
+              <span v-if="rightActiveCount > 0">無符合篩選條件的補件</span>
+              <span v-else-if="searchQuery.trim()">未找到符合的補件</span>
               <span v-else>目前無孤立補件</span>
             </div>
 

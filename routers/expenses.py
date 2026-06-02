@@ -59,6 +59,14 @@ def list_expenses(
     referenced_invoice_number: str | None = Query(default=None, description="篩選指定原始憑證號碼的補件"),
     has_duplicate: bool | None = Query(default=None, description="True 時只回傳疑似重複憑證的 Expense"),
     relation_type: str | None = Query(default=None, description="精確篩選補件類型，如 RETURN_SUPPLEMENT"),
+    # ── 進階多條件篩選（新增，全部選填，AND 疊加）────────────────────────
+    serial_number_q: str | None = Query(default=None, description="案件編號模糊搜尋"),
+    invoice_number_q: str | None = Query(default=None, description="發票號碼模糊搜尋"),
+    uploader_name_q: str | None = Query(default=None, description="上傳者姓名模糊搜尋"),
+    uploader_dept_q: str | None = Query(default=None, description="上傳者組別模糊搜尋"),
+    amount_min: float | None = Query(default=None, description="最低金額（含）"),
+    amount_max: float | None = Query(default=None, description="最高金額（含）"),
+    voucher_category_q: str | None = Query(default=None, description="憑證類別篩選（比對 voucher_categories JSON）"),
     db: Session = Depends(get_db),
 ) -> dict:
     total, items = expense_service.list_expenses(
@@ -67,6 +75,13 @@ def list_expenses(
         referenced_invoice_number=referenced_invoice_number,
         has_duplicate=has_duplicate,
         relation_type=relation_type,
+        serial_number_q=serial_number_q,
+        invoice_number_q=invoice_number_q,
+        uploader_name_q=uploader_name_q,
+        uploader_dept_q=uploader_dept_q,
+        amount_min=amount_min,
+        amount_max=amount_max,
+        voucher_category_q=voucher_category_q,
     )
     return {
         "status": "success",

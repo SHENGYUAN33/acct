@@ -186,6 +186,14 @@ def list_expenses(
     referenced_invoice_number: str | None = None,
     has_duplicate: bool | None = None,
     relation_type: str | None = None,
+    # ── 進階多條件篩選（新增，所有條件 AND 疊加）──────────────────────
+    serial_number_q: str | None = None,
+    invoice_number_q: str | None = None,
+    uploader_name_q: str | None = None,
+    uploader_dept_q: str | None = None,
+    amount_min: float | None = None,
+    amount_max: float | None = None,
+    voucher_category_q: str | None = None,
 ) -> tuple[int, list[Expense]]:
     """Return (total_count, expenses) with optional filters and pagination.
 
@@ -194,6 +202,9 @@ def list_expenses(
     referenced_invoice_number：精確篩選補件所參考的原始憑證號碼。
     has_duplicate=True：只回傳 possible_duplicate_of 非 null 的疑似重複記錄。
     relation_type：精確篩選補件類型（如 RETURN_SUPPLEMENT）。
+    serial_number_q / invoice_number_q / uploader_name_q / uploader_dept_q：各欄位獨立模糊搜尋。
+    amount_min / amount_max：金額範圍篩選（含邊界）。
+    voucher_category_q：憑證類別篩選（比對 voucher_categories JSON 字串）。
     """
     stmt = select(Expense).order_by(
         nullslast(Expense.display_order),
@@ -219,6 +230,21 @@ def list_expenses(
         stmt = stmt.where(Expense.possible_duplicate_of.isnot(None))
     if relation_type:
         stmt = stmt.where(Expense.relation_type == relation_type)
+    # ── 進階多條件篩選（各條件獨立 AND 疊加，不影響上方既有條件）──────
+    if serial_number_q:
+        stmt = stmt.where(Expense.serial_number.ilike(f"%{serial_number_q}%"))
+    if invoice_number_q:
+        stmt = stmt.where(Expense.invoice_number.ilike(f"%{invoice_number_q}%"))
+    if uploader_name_q:
+        stmt = stmt.where(Expense.uploader_name.ilike(f"%{uploader_name_q}%"))
+    if uploader_dept_q:
+        stmt = stmt.where(Expense.uploader_dept.ilike(f"%{uploader_dept_q}%"))
+    if amount_min is not None:
+        stmt = stmt.where(Expense.total_amount >= amount_min)
+    if amount_max is not None:
+        stmt = stmt.where(Expense.total_amount <= amount_max)
+    if voucher_category_q:
+        stmt = stmt.where(Expense.voucher_categories.ilike(f'%"{voucher_category_q}"%'))
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     items = db.scalars(stmt.offset((page - 1) * page_size).limit(page_size)).all()
