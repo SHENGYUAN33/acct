@@ -27,12 +27,6 @@ def _generate_serial_number(db: Session) -> str:
     race condition 由呼叫方的重試機制處理。
     """
     prefix = datetime.now().strftime('%Y%m')
-
-    bind = db.get_bind()
-    if bind.dialect.name == "postgresql":
-        next_seq = db.execute(text("SELECT nextval('expense_serial_seq')")).scalar_one()
-        return f"EXP-{prefix}-{int(next_seq):04d}"
-
     max_serial: str | None = db.scalar(
         select(func.max(Expense.serial_number)).where(
             Expense.serial_number.like(f"EXP-{prefix}-%")

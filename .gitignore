@@ -37,6 +37,26 @@ maps/
 e2e/playwright-report/
 e2e/test-results/
 
+# k6 raw output
+k6-results/
+
+# CI / QA agent debug artifacts — 不得 commit
+*_npm_ci.txt
+*_npm_test.txt
+*_npm_build.txt
+*_pytest.txt
+*_alembic_*.txt
+*_playwright_*.txt
+postgres_*.txt
+frontend_*.txt
+e2e_*.txt
+test_results*.txt
+test_known_*.txt
+git_status_*.txt
+cicd_static_*.txt
+before_hashes.txt
+www.txt
+
 # IDE
 .vscode/
 .idea/
