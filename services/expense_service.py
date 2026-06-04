@@ -12,6 +12,7 @@ from sqlalchemy import select, func, text, nullslast
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from core.config import settings
 from models.expense import Expense, ExpenseStatus
 from models.expense_image import ExpenseImage
 from models.user import User
@@ -330,10 +331,10 @@ def get_expenses_for_export(
     status: ExpenseStatus | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
-    limit: int = 10000,
+    limit: int = settings.expense_export_limit,
     include_inactive: bool = False,
 ) -> list[Expense]:
-    """回傳符合篩選條件的費用清單供 CSV 匯出（最多 limit 筆，預設 10,000）。"""
+    """回傳符合篩選條件的費用清單供 CSV 匯出（最多 limit 筆，由 EXPENSE_EXPORT_LIMIT 控制）。"""
     stmt = select(Expense).order_by(Expense.created_at.desc())
     if not include_inactive:
         stmt = stmt.where(Expense.is_active == True)

@@ -91,6 +91,8 @@ class Settings(BaseSettings):
     liff_session_ttl_minutes: int = 30
     # 孤立物品圖向前關聯的時間視窗（分鐘）：在此視窗內的最新報帳可被補入
     orphan_window_minutes: int = 10
+    # CSV 匯出單次最多筆數上限
+    expense_export_limit: int = 10000
 
     # 部門清單：透過 .env 的 DEPARTMENTS 逗號分隔字串設定，無需重新部署
     departments: list[str] = [
