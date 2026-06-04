@@ -93,7 +93,9 @@ export const fetchExpenseImages = (expenseId) =>
  *       超過全域預設 15s 會導致請求被提前中斷（顯示「辨識失敗」）。
  */
 export const reOcrExpense = (id) =>
-  apiClient.post(`/api/v1/expenses/${id}/reocr`, undefined, { timeout: 120000 })
+  apiClient.post(`/api/v1/expenses/${id}/reocr`, undefined, {
+    timeout: Number(import.meta.env.VITE_OCR_TIMEOUT_MS) || 120000,
+  })
 
 /**
  * POST /api/v1/admin/process-pending
