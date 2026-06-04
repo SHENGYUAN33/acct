@@ -75,6 +75,16 @@ def get_line_api() -> MessagingApi:
     return MessagingApi(ApiClient(_line_config))
 
 
+def get_user_display_name(line_user_id: str) -> str | None:
+    """向 LINE API 取得使用者的顯示名稱（暱稱）。失敗時回傳 None。"""
+    try:
+        profile = get_line_api().get_profile(line_user_id)
+        return profile.display_name
+    except Exception as exc:
+        logger.warning("line_service.get_user_display_name: failed for user=%s: %s", line_user_id, exc)
+        return None
+
+
 def reply_text(reply_token: str, text: str) -> None:
     """回覆純文字訊息給 LINE 使用者。"""
     api = get_line_api()

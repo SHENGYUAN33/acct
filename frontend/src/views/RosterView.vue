@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Plus, Upload, FileDown, Loader2, UserCheck, UserX, Pencil, Trash2, Link2Off } from 'lucide-vue-next'
+import { Plus, Upload, FileDown, Download, Loader2, Pencil, Trash2, Link2Off } from 'lucide-vue-next'
 import ConfirmModal from '../components/ConfirmModal.vue'
 import {
   getRosterList,
@@ -10,6 +10,7 @@ import {
   importRosterCSV,
   unbindRosterEntry,
   downloadRosterTemplate,
+  exportRosterCSV,
 } from '../api/rosterApi'
 
 // ── 組別選項（與 LINE Bot Onboarding 一致） ──────────────────────
@@ -18,53 +19,65 @@ const DEPARTMENTS = [
   '服裝組', '化妝組', '剪接組', '音效組', '行政組',
 ]
 
+const ACCOUNT_ROLES = ['一般員工', '管理員']
+
 // ── 狀態 ─────────────────────────────────────────────────────────
 const roster = ref([])
 const isLoading = ref(false)
-const toast = ref(null)           // { type: 'success' | 'error' | 'warn', message: string }
+const toast = ref(null)
 let toastTimer = null
 
 // 分頁
-const currentPage = ref(0)        // 後端以 0 為起始頁
+const currentPage = ref(0)
 const pageSize = ref(20)
 const totalCount = ref(0)
 
-// 篩選（'all' | 'bound' | 'unbound'）
+// 篩選
 const bindFilter = ref('all')
 
-// CSV 匯入：隱藏的 file input
+// CSV 匯入 / 匯出
 const fileInputRef = ref(null)
 const isImporting = ref(false)
+const isExporting = ref(false)
 
 // ── Modal：新增 / 編輯 ────────────────────────────────────────────
 const showFormModal = ref(false)
 const isEditMode = ref(false)
 const isSaving = ref(false)
 const editingId = ref(null)
-const form = ref({ name: '', department: '', employee_id: '' })
+const emptyForm = () => ({
+  name: '',
+  department: '',
+  line_id: '',
+  account_role: '',
+  line_name: '',
+  email: '',
+  is_petty_cash_target: false,
+  bank_account: '',
+})
+const form = ref(emptyForm())
 const formError = ref('')
 
 // ── Confirm Dialog：刪除 ──────────────────────────────────────────
-const deleteTarget = ref(null)    // { id, name }
+const deleteTarget = ref(null)
 const showDeleteConfirm = ref(false)
 const isDeleting = ref(false)
 
 // ── Confirm Dialog：解除綁定 ─────────────────────────────────────
-const unbindTarget = ref(null)    // { id, name }
+const unbindTarget = ref(null)
 const showUnbindConfirm = ref(false)
 const isUnbinding = ref(false)
 
 // ── CSV 匯入結果 Modal ────────────────────────────────────────────
 const showImportResult = ref(false)
-const importResultData = ref(null)  // { created, updated, errors: [{row, reason}] }
+const importResultData = ref(null)
 
 // ── Computed ─────────────────────────────────────────────────────
 const totalPages = computed(() => Math.max(1, Math.ceil(totalCount.value / pageSize.value)))
 
-// 分頁按鈕清單（含省略號）；數字為 1-based 頁碼，'...' 為分隔符
 const pageButtons = computed(() => {
   const total = totalPages.value
-  const cur = currentPage.value + 1  // 轉為 1-based
+  const cur = currentPage.value + 1
 
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
 
@@ -81,7 +94,7 @@ const pageButtons = computed(() => {
   return result
 })
 
-// ── Toast 工具 ────────────────────────────────────────────────────
+// ── Toast ─────────────────────────────────────────────────────────
 function showToast(type, message, duration = 4000) {
   clearTimeout(toastTimer)
   toast.value = { type, message }
@@ -122,7 +135,7 @@ function goToPage(page) {
 function openCreateModal() {
   isEditMode.value = false
   editingId.value = null
-  form.value = { name: '', department: '', employee_id: '' }
+  form.value = emptyForm()
   formError.value = ''
   showFormModal.value = true
 }
@@ -133,7 +146,12 @@ function openEditModal(entry) {
   form.value = {
     name: entry.name || '',
     department: entry.department || '',
-    employee_id: entry.employee_id || '',
+    line_id: entry.line_id || '',
+    account_role: entry.account_role || '',
+    line_name: entry.line_name || '',
+    email: entry.email || '',
+    is_petty_cash_target: entry.is_petty_cash_target ?? false,
+    bank_account: entry.bank_account || '',
   }
   formError.value = ''
   showFormModal.value = true
@@ -158,8 +176,12 @@ async function handleSave() {
     const payload = {
       name: form.value.name.trim(),
       department: form.value.department,
-      // 始終送出 employee_id：有值則更新，空字串轉 null 表示清除
-      employee_id: form.value.employee_id.trim() || null,
+      line_id: form.value.line_id.trim() || null,
+      account_role: form.value.account_role || null,
+      line_name: form.value.line_name.trim() || null,
+      email: form.value.email.trim() || null,
+      is_petty_cash_target: form.value.is_petty_cash_target,
+      bank_account: form.value.bank_account.trim() || null,
     }
 
     if (isEditMode.value) {
@@ -230,6 +252,19 @@ async function handleUnbind() {
   }
 }
 
+// ── CSV 匯出 ─────────────────────────────────────────────────────
+async function handleExport() {
+  isExporting.value = true
+  try {
+    await exportRosterCSV()
+  } catch (err) {
+    showToast('error', '❌ 匯出失敗，請稍後再試')
+    console.error('[RosterView] exportRosterCSV 失敗：', err)
+  } finally {
+    isExporting.value = false
+  }
+}
+
 // ── CSV 匯入 ─────────────────────────────────────────────────────
 function triggerImport() {
   fileInputRef.value?.click()
@@ -238,7 +273,6 @@ function triggerImport() {
 async function handleFileSelected(event) {
   const file = event.target.files?.[0]
   if (!file) return
-  // 重置 input，讓同一個檔案可以重複選取
   event.target.value = ''
 
   isImporting.value = true
@@ -265,7 +299,6 @@ async function handleFileSelected(event) {
 function formatDate(dateStr) {
   if (!dateStr) return '—'
   try {
-    // 若字串不帶時區資訊，補上 Z（視為 UTC）以確保本地時間轉換正確
     const normalized = /[Zz]|[+-]\d{2}:?\d{2}$/.test(dateStr) ? dateStr : dateStr + 'Z'
     const d = new Date(normalized)
     const y = d.getFullYear()
@@ -304,7 +337,6 @@ onMounted(() => fetchRoster(0))
     <!-- ── 頁面頂部工具列 ──────────────────────────────────────── -->
     <div class="px-4 pt-4 pb-3 flex items-center gap-2 flex-wrap">
 
-      <!-- 左側操作按鈕 -->
       <button
         @click="openCreateModal"
         class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-400 rounded-full text-sm text-gray-600 hover:bg-gray-100 transition-colors"
@@ -322,7 +354,6 @@ onMounted(() => fetchRoster(0))
         <Upload v-else :size="14" />
         {{ isImporting ? '匯入中...' : '匯入 CSV' }}
       </button>
-      <!-- 隱藏的 file input -->
       <input
         ref="fileInputRef"
         type="file"
@@ -330,6 +361,16 @@ onMounted(() => fetchRoster(0))
         class="hidden"
         @change="handleFileSelected"
       />
+
+      <button
+        @click="handleExport"
+        :disabled="isExporting"
+        class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-400 rounded-full text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-60 transition-colors"
+      >
+        <Loader2 v-if="isExporting" :size="14" class="animate-spin" />
+        <Download v-else :size="14" />
+        {{ isExporting ? '匯出中...' : '匯出 CSV' }}
+      </button>
 
       <button
         @click="downloadRosterTemplate"
@@ -369,85 +410,98 @@ onMounted(() => fetchRoster(0))
     <div class="px-4 pb-6">
       <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
 
-        <!-- 空狀態 -->
         <div v-if="!isLoading && roster.length === 0" class="py-16 text-center text-gray-400">
           <p class="text-sm">尚未匯入員工名冊，請點擊「匯入 CSV」開始</p>
         </div>
 
-        <!-- 資料表格 -->
-        <table v-else class="w-full text-sm">
-          <thead>
-            <tr class="bg-gray-50 border-b border-gray-200 text-left text-xs text-gray-500 uppercase tracking-wide">
-              <th class="px-4 py-2.5 font-medium">姓名</th>
-              <th class="px-4 py-2.5 font-medium">組別</th>
-              <th class="px-4 py-2.5 font-medium">員工編號</th>
-              <th class="px-4 py-2.5 font-medium">綁定狀態</th>
-              <th class="px-4 py-2.5 font-medium">綁定時間</th>
-              <th class="px-4 py-2.5 font-medium text-right">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="entry in roster"
-              :key="entry.id"
-              class="border-b border-gray-100 hover:bg-gray-50 transition-colors"
-            >
-              <td class="px-4 py-3 font-medium text-gray-800">{{ entry.name }}</td>
-              <td class="px-4 py-3 text-gray-600">{{ entry.department || '—' }}</td>
-              <td class="px-4 py-3 text-gray-500 font-mono text-xs">{{ entry.employee_id || '—' }}</td>
-              <td class="px-4 py-3">
-                <span
-                  v-if="entry.is_bound"
-                  class="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800"
-                >✅ 已綁定</span>
-                <span
-                  v-else
-                  class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600"
-                >⏳ 未綁定</span>
-              </td>
-              <td class="px-4 py-3 text-gray-500 text-xs">{{ formatDate(entry.bound_at) }}</td>
-              <td class="px-4 py-3">
-                <div class="flex items-center justify-end gap-1.5">
-                  <!-- 編輯 -->
-                  <button
-                    @click="openEditModal(entry)"
-                    class="flex items-center gap-1 px-2 py-1 rounded text-xs text-blue-600 hover:bg-blue-50 transition-colors"
-                    title="編輯員工資料"
-                  >
-                    <Pencil :size="12" />
-                    編輯
-                  </button>
-                  <!-- 解除綁定（已綁定才顯示） -->
-                  <button
+        <div v-else class="overflow-x-auto">
+          <table class="w-full text-sm whitespace-nowrap">
+            <thead>
+              <tr class="bg-gray-50 border-b border-gray-200 text-left text-xs text-gray-500 uppercase tracking-wide">
+                <th class="px-4 py-2.5 font-medium">姓名</th>
+                <th class="px-4 py-2.5 font-medium">組別</th>
+                <th class="px-4 py-2.5 font-medium">LINE ID</th>
+                <th class="px-4 py-2.5 font-medium">LINE 名稱</th>
+                <th class="px-4 py-2.5 font-medium">Email</th>
+                <th class="px-4 py-2.5 font-medium">帳號權限</th>
+                <th class="px-4 py-2.5 font-medium text-center">匯款零用金</th>
+                <th class="px-4 py-2.5 font-medium">匯款帳號</th>
+                <th class="px-4 py-2.5 font-medium">綁定狀態</th>
+                <th class="px-4 py-2.5 font-medium">綁定時間</th>
+                <th class="px-4 py-2.5 font-medium text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="entry in roster"
+                :key="entry.id"
+                class="border-b border-gray-100 hover:bg-gray-50 transition-colors"
+              >
+                <td class="px-4 py-3 font-medium text-gray-800">{{ entry.name }}</td>
+                <td class="px-4 py-3 text-gray-600">{{ entry.department || '—' }}</td>
+                <td class="px-4 py-3 text-gray-500 font-mono text-xs">{{ entry.line_id || '—' }}</td>
+                <td class="px-4 py-3 text-gray-600">{{ entry.line_name || '—' }}</td>
+                <td class="px-4 py-3 text-gray-500 text-xs">{{ entry.email || '—' }}</td>
+                <td class="px-4 py-3 text-gray-600">{{ entry.account_role || '—' }}</td>
+                <td class="px-4 py-3 text-center">
+                  <span
+                    v-if="entry.is_petty_cash_target"
+                    class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100 text-green-700 font-bold text-xs"
+                    title="公司匯款零用金對象"
+                  >✓</span>
+                  <span v-else class="text-gray-300">—</span>
+                </td>
+                <td class="px-4 py-3 text-gray-500 font-mono text-xs">{{ entry.bank_account || '—' }}</td>
+                <td class="px-4 py-3">
+                  <span
                     v-if="entry.is_bound"
-                    @click="confirmUnbind(entry)"
-                    class="flex items-center gap-1 px-2 py-1 rounded text-xs text-amber-600 hover:bg-amber-50 transition-colors"
-                    title="解除 LINE 綁定"
-                  >
-                    <Link2Off :size="12" />
-                    解除綁定
-                  </button>
-                  <!-- 刪除 -->
-                  <button
-                    @click="confirmDelete(entry)"
-                    class="flex items-center gap-1 px-2 py-1 rounded text-xs text-red-500 hover:bg-red-50 transition-colors"
-                    title="刪除員工"
-                  >
-                    <Trash2 :size="12" />
-                    刪除
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                    class="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800"
+                  >✅ 已綁定</span>
+                  <span
+                    v-else
+                    class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600"
+                  >⏳ 未綁定</span>
+                </td>
+                <td class="px-4 py-3 text-gray-500 text-xs">{{ formatDate(entry.bound_at) }}</td>
+                <td class="px-4 py-3">
+                  <div class="flex items-center justify-end gap-1.5">
+                    <button
+                      @click="openEditModal(entry)"
+                      class="flex items-center gap-1 px-2 py-1 rounded text-xs text-blue-600 hover:bg-blue-50 transition-colors"
+                      title="編輯員工資料"
+                    >
+                      <Pencil :size="12" />
+                      編輯
+                    </button>
+                    <button
+                      v-if="entry.is_bound"
+                      @click="confirmUnbind(entry)"
+                      class="flex items-center gap-1 px-2 py-1 rounded text-xs text-amber-600 hover:bg-amber-50 transition-colors"
+                      title="解除 LINE 綁定"
+                    >
+                      <Link2Off :size="12" />
+                      解除綁定
+                    </button>
+                    <button
+                      @click="confirmDelete(entry)"
+                      class="flex items-center gap-1 px-2 py-1 rounded text-xs text-red-500 hover:bg-red-50 transition-colors"
+                      title="刪除員工"
+                    >
+                      <Trash2 :size="12" />
+                      刪除
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
         <!-- 分頁 -->
         <div
           v-if="!isLoading && totalCount > 0"
           class="flex items-center justify-between px-3 py-2.5 border-t border-gray-200 bg-white text-sm"
         >
-          <!-- 左側：總數 + 每頁筆數 -->
           <div class="flex items-center gap-2 text-gray-500">
             <select
               :value="pageSize"
@@ -460,7 +514,6 @@ onMounted(() => fetchRoster(0))
             <span class="text-gray-400 ml-2">共 {{ totalCount }} 筆</span>
           </div>
 
-          <!-- 右側：頁碼（含省略號） -->
           <div class="flex items-center gap-1">
             <button
               @click="goToPage(currentPage - 1)"
@@ -503,11 +556,9 @@ onMounted(() => fetchRoster(0))
           aria-modal="true"
           role="dialog"
         >
-          <!-- 遮罩 -->
           <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="closeFormModal" />
 
-          <!-- 卡片 -->
-          <div class="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
+          <div class="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
             <h3 class="text-gray-900 font-semibold text-lg mb-5">
               {{ isEditMode ? '編輯員工資料' : '新增員工' }}
             </h3>
@@ -540,19 +591,88 @@ onMounted(() => fetchRoster(0))
                 </select>
               </div>
 
-              <!-- 員工編號（選填） -->
+              <!-- LINE ID -->
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">
-                  員工編號
+                  LINE ID
                   <span class="text-gray-400 font-normal text-xs ml-1">（選填）</span>
                 </label>
                 <input
-                  v-model="form.employee_id"
+                  v-model="form.line_id"
                   type="text"
-                  placeholder="EMP001"
+                  placeholder="@username"
                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
                 />
-                <p class="mt-1 text-xs text-gray-400">作為員工在 LINE Bot 輸入的識別碼</p>
+              </div>
+
+              <!-- 帳號權限 -->
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">
+                  帳號權限
+                  <span class="text-gray-400 font-normal text-xs ml-1">（選填）</span>
+                </label>
+                <select
+                  v-model="form.account_role"
+                  class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                >
+                  <option value="">— 未設定 —</option>
+                  <option v-for="role in ACCOUNT_ROLES" :key="role" :value="role">{{ role }}</option>
+                </select>
+              </div>
+
+              <!-- LINE 名稱 -->
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">
+                  LINE 名稱
+                  <span class="text-gray-400 font-normal text-xs ml-1">（選填）</span>
+                </label>
+                <input
+                  v-model="form.line_name"
+                  type="text"
+                  placeholder="LINE 顯示名稱"
+                  class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                />
+              </div>
+
+              <!-- Email -->
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">
+                  Email
+                  <span class="text-gray-400 font-normal text-xs ml-1">（選填）</span>
+                </label>
+                <input
+                  v-model="form.email"
+                  type="email"
+                  placeholder="example@company.com"
+                  class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                />
+              </div>
+
+              <!-- 公司匯款零用金對象 -->
+              <div class="flex items-center gap-3">
+                <input
+                  id="petty-cash-checkbox"
+                  v-model="form.is_petty_cash_target"
+                  type="checkbox"
+                  class="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-400 cursor-pointer"
+                />
+                <label for="petty-cash-checkbox" class="text-sm font-medium text-gray-700 cursor-pointer select-none">
+                  公司匯款零用金之對象
+                </label>
+              </div>
+
+              <!-- 匯款帳號 -->
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">
+                  匯款帳號
+                  <span class="text-gray-400 font-normal text-xs ml-1">（選填）</span>
+                </label>
+                <input
+                  v-model="form.bank_account"
+                  type="text"
+                  placeholder="銀行帳號"
+                  class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                />
               </div>
 
               <!-- 錯誤訊息 -->
@@ -596,7 +716,7 @@ onMounted(() => fetchRoster(0))
     <ConfirmModal
       :open="showUnbindConfirm"
       :title="`確定解除 ${unbindTarget?.name} 的 LINE 綁定？`"
-      description="對方下次互動需重新輸入員工編號。"
+      description="對方下次互動需重新輸入姓名。"
       confirm-text="確定解除"
       @confirm="handleUnbind"
       @cancel="showUnbindConfirm = false"
@@ -615,7 +735,6 @@ onMounted(() => fetchRoster(0))
           <div class="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-lg mx-4">
             <h3 class="text-gray-900 font-semibold text-lg mb-4">CSV 匯入結果</h3>
 
-            <!-- 統計摘要 -->
             <div class="flex gap-4 mb-4">
               <div class="flex-1 bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-center">
                 <div class="text-xl font-bold text-green-700">{{ importResultData.created }}</div>
@@ -639,7 +758,6 @@ onMounted(() => fetchRoster(0))
               </div>
             </div>
 
-            <!-- 錯誤明細（有錯誤才顯示） -->
             <div v-if="importResultData.errors.length > 0">
               <p class="text-sm font-medium text-red-600 mb-2">錯誤明細：</p>
               <ul class="max-h-48 overflow-y-auto space-y-1 border border-red-100 rounded-lg p-2 bg-red-50">

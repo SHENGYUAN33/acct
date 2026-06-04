@@ -54,14 +54,28 @@ export const unbindRosterEntry = (id) =>
   apiClient.post(`/api/v1/roster/${id}/unbind`)
 
 /**
+ * GET /api/v1/roster/export
+ * 匯出現有員工名冊為 CSV 並觸發下載
+ */
+export const exportRosterCSV = async () => {
+  const res = await apiClient.get('/api/v1/roster/export', { responseType: 'blob' })
+  const url = URL.createObjectURL(res.data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'roster_export.csv'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+/**
  * 下載 CSV 樣板（前端本地產生，不需後端）
  * 產生含範例資料的 CSV 並觸發瀏覽器下載
  */
 export const downloadRosterTemplate = () => {
   const content = [
-    'name,department,employee_id',
-    '王小明,製片組,EMP001',
-    '李小華,攝影組,',
+    'name,department,line_id,account_role,line_name,email,is_petty_cash_target,bank_account',
+    '王小明,製片組,,一般員工,王小明LINE,wangxm@example.com,false,',
+    '李小華,攝影組,,管理員,,lixh@example.com,true,123456789',
   ].join('\n')
 
   // 加 BOM 確保 Excel 正確顯示中文

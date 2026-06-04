@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import logging
 import math
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -56,17 +59,16 @@ def create_roster(
     db: Session = Depends(get_db),
 ) -> dict:
     """新增單筆員工至名冊。"""
-    # 若 employee_id 已存在，回傳 409
-    if body.employee_id:
-        existing = roster_service.get_roster_by_employee_id(db, body.employee_id)
-        if existing:
-            raise HTTPException(status_code=409, detail=f"員工編號「{body.employee_id}」已存在")
-
     entry = roster_service.create_roster_entry(
         db,
         name=body.name,
         department=body.department,
-        employee_id=body.employee_id,
+        line_id=body.line_id,
+        account_role=body.account_role,
+        line_name=body.line_name,
+        email=body.email,
+        is_petty_cash_target=body.is_petty_cash_target,
+        bank_account=body.bank_account,
     )
     return {
         "status": "success",
@@ -75,25 +77,66 @@ def create_roster(
     }
 
 
+# ── GET /roster/export（匯出現有名冊 CSV）── 必須在 /{roster_id} 前定義 ──
+@router.get("/export")
+def export_roster_csv(
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """匯出現有員工名冊為 CSV（UTF-8 with BOM，供 Excel 直接開啟）。
+
+    欄位順序與匯入樣板一致：name, department, line_id, account_role,
+    line_name, email, is_petty_cash_target, bank_account。
+    綁定相關欄位（line_user_id, is_bound 等）不包含在內。
+    """
+    items, _ = roster_service.get_all_roster(db, page=0, size=10000)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["name", "department", "line_id", "account_role",
+                     "line_name", "email", "is_petty_cash_target", "bank_account"])
+    for item in items:
+        writer.writerow([
+            item.name,
+            item.department,
+            item.line_id or "",
+            item.account_role or "",
+            item.line_name or "",
+            item.email or "",
+            "true" if item.is_petty_cash_target else "false",
+            item.bank_account or "",
+        ])
+
+    bom = "﻿"
+    content = bom + output.getvalue()
+
+    return StreamingResponse(
+        iter([content.encode("utf-8")]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=roster_export.csv"},
+    )
+
+
 # ── POST /roster/import（CSV 批次匯入）—— 必須在 /{roster_id} 前定義 ──
 @router.post("/import", response_model=dict)
 async def import_roster_csv(
-    file: UploadFile = File(..., description="CSV 檔案（欄位：name, department, employee_id）"),
+    file: UploadFile = File(
+        ...,
+        description="CSV 檔案（欄位：name, department, line_id, account_role, line_name, email, is_petty_cash_target, bank_account）",
+    ),
     db: Session = Depends(get_db),
 ) -> dict:
     """批次匯入員工名冊 CSV。
 
     CSV 格式規範：
     - 必要欄位：name, department
-    - 選填欄位：employee_id
+    - 選填欄位：line_id, account_role, line_name, email, is_petty_cash_target, bank_account
     - 支援 UTF-8 with BOM（Excel 匯出格式）
-    - employee_id 相同時 upsert（更新 name/department，不重置綁定狀態）
+    - name 相同時 upsert（更新資料欄位，不重置綁定狀態）
     """
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="請上傳 .csv 格式的檔案")
 
     raw_bytes = await file.read()
-    # 支援 UTF-8 with BOM（Excel 匯出時常帶 BOM）
     csv_content = raw_bytes.decode("utf-8-sig")
 
     result = roster_service.import_from_csv(db, csv_content)
@@ -113,22 +156,13 @@ def update_roster(
 ) -> dict:
     """修改員工名冊資料（只更新有傳入的欄位）。
 
-    employee_id 明確傳入 null 表示清除；未傳入該欄位則不動原值。
+    各欄位明確傳入 null 表示清除；未傳入該欄位則不動原值。
     """
-    # 若前端明確傳入非空的 employee_id，檢查是否與其他記錄衝突
-    if "employee_id" in body.model_fields_set and body.employee_id:
-        existing = roster_service.get_roster_by_employee_id(db, body.employee_id)
-        if existing and existing.id != roster_id:
-            raise HTTPException(status_code=409, detail=f"員工編號「{body.employee_id}」已被其他記錄使用")
-
-    # 只把前端實際傳入的欄位送給 service（區分「未傳入」vs「明確 null 清除」）
     kwargs: dict = {}
-    if "name" in body.model_fields_set:
-        kwargs["name"] = body.name
-    if "department" in body.model_fields_set:
-        kwargs["department"] = body.department
-    if "employee_id" in body.model_fields_set:
-        kwargs["employee_id"] = body.employee_id  # None = 清除
+    for field in ("name", "department", "line_id", "account_role", "line_name", "email",
+                  "is_petty_cash_target", "bank_account"):
+        if field in body.model_fields_set:
+            kwargs[field] = getattr(body, field)
 
     entry = roster_service.update_roster_entry(db, roster_id=roster_id, **kwargs)
     if entry is None:
@@ -150,7 +184,6 @@ def delete_roster(
     """刪除員工名冊記錄。已綁定 LINE 的員工無法刪除，回傳 400。"""
     success = roster_service.delete_roster_entry(db, roster_id)
     if success is False:
-        # 先確認記錄存在，以區分「找不到」與「已綁定」兩種情況
         entry = roster_service.get_roster_by_id(db, roster_id)
         if entry is None:
             raise HTTPException(status_code=404, detail="找不到指定的員工名冊記錄")
@@ -170,7 +203,6 @@ def unbind_roster(
     db: Session = Depends(get_db),
 ) -> dict:
     """解除員工的 LINE 綁定狀態（清空 line_user_id / is_bound=False / bound_at=None）。"""
-    # 先取得 line_user_id，解除後才能回去清 users 表
     roster_entry = roster_service.get_roster_by_id(db, roster_id)
     if roster_entry is None:
         raise HTTPException(status_code=404, detail="找不到指定的員工名冊記錄")
@@ -181,7 +213,6 @@ def unbind_roster(
     if entry is None:
         raise HTTPException(status_code=404, detail="找不到指定的員工名冊記錄")
 
-    # 同步清空 users 表的 real_name / department，讓 LIFF 與 Webhook 生效
     if bound_line_user_id:
         user = db.scalar(select(User).where(User.line_user_id == bound_line_user_id))
         if user:

@@ -11,20 +11,35 @@ from pydantic import BaseModel
 class RosterCreate(BaseModel):
     name: str
     department: str
-    employee_id: str | None = None
+    line_id: str | None = None
+    account_role: str | None = None
+    line_name: str | None = None
+    email: str | None = None
+    is_petty_cash_target: bool = False
+    bank_account: str | None = None
 
 
 class RosterUpdate(BaseModel):
     name: str | None = None
     department: str | None = None
-    employee_id: str | None = None
+    line_id: str | None = None
+    account_role: str | None = None
+    line_name: str | None = None
+    email: str | None = None
+    is_petty_cash_target: bool | None = None
+    bank_account: str | None = None
 
 
 class RosterRead(BaseModel):
     id: UUID
     name: str
     department: str
-    employee_id: str | None
+    line_id: str | None
+    account_role: str | None
+    line_name: str | None
+    email: str | None
+    is_petty_cash_target: bool
+    bank_account: str | None
     line_user_id: str | None
     is_bound: bool
     bound_at: datetime | None

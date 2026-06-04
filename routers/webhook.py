@@ -89,8 +89,11 @@ async def webhook(
                     continue
 
                 # 任何文字訊息都直接嘗試比對名冊，不需要兩步驟
+                line_display_name = user.name or line_service.get_user_display_name(line_user_id)
                 try:
-                    result = roster_service.bind_line_user_by_name(db, name_input, line_user_id)
+                    result = roster_service.bind_line_user_by_name(
+                        db, name_input, line_user_id, line_display_name=line_display_name
+                    )
                 except Exception as exc:
                     logger.error("webhook: 名冊綁定失敗 user=%s name=%r: %s", line_user_id, name_input, exc, exc_info=True)
                     line_service.reply_text(
