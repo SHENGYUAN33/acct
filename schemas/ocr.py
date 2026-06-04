@@ -2,11 +2,13 @@
 
 from pydantic import BaseModel, Field
 
+from core.config import settings
+
 # ── 關鍵稽核欄位：任一欄位信心 < KEY_FIELD_THRESHOLD → NEEDS_MANUAL_REVIEW ──
 KEY_AUDIT_FIELDS: frozenset[str] = frozenset(
     {"invoice_number", "seller_tax_id", "total_amount", "id_number"}
 )
-KEY_FIELD_THRESHOLD: float = 0.8
+KEY_FIELD_THRESHOLD: float = settings.key_field_confidence_threshold
 
 
 class VoucherOCRResult(BaseModel):
