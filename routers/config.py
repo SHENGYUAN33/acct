@@ -20,3 +20,13 @@ def get_departments() -> dict:
         "data": {"departments": settings.departments},
         "message": "",
     }
+
+
+@router.get("/account-roles")
+def get_account_roles() -> dict:
+    """回傳目前系統設定的帳號角色清單（由 .env ACCOUNT_ROLES 控制）。"""
+    return {
+        "status": "success",
+        "data": {"account_roles": settings.account_roles},
+        "message": "",
+    }

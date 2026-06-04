@@ -93,6 +93,8 @@ class Settings(BaseSettings):
     orphan_window_minutes: int = 10
     # CSV 匯出單次最多筆數上限
     expense_export_limit: int = 10000
+    # 帳號角色清單（員工名冊用）
+    account_roles: list[str] = ["一般員工", "管理員"]
 
     # 部門清單：透過 .env 的 DEPARTMENTS 逗號分隔字串設定，無需重新部署
     departments: list[str] = [
@@ -122,6 +124,16 @@ class Settings(BaseSettings):
             if stripped.startswith("["):
                 return json.loads(stripped)
             return [d.strip() for d in stripped.split(",") if d.strip()]
+        return v
+
+    @field_validator("account_roles", mode="before")
+    @classmethod
+    def parse_account_roles(cls, v: object) -> list[str]:
+        if isinstance(v, str):
+            stripped = v.strip()
+            if stripped.startswith("["):
+                return json.loads(stripped)
+            return [r.strip() for r in stripped.split(",") if r.strip()]
         return v
 
 

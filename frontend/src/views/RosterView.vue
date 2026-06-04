@@ -12,12 +12,12 @@ import {
   downloadRosterTemplate,
   exportRosterCSV,
 } from '../api/rosterApi'
-import { fetchDepartments } from '../api/configApi'
+import { fetchDepartments, fetchAccountRoles } from '../api/configApi'
 
 // ── 組別選項（從後端 /api/v1/config/departments 動態載入，與 .env DEPARTMENTS 同步） ──
 const DEPARTMENTS = ref([])
-
-const ACCOUNT_ROLES = ['一般員工', '管理員']
+// ── 帳號角色（從後端 /api/v1/config/account-roles 動態載入） ──────────────
+const ACCOUNT_ROLES = ref([])
 
 // ── 狀態 ─────────────────────────────────────────────────────────
 const roster = ref([])
@@ -313,8 +313,9 @@ function formatDate(dateStr) {
 onMounted(async () => {
   fetchRoster(0)
   try {
-    const res = await fetchDepartments()
-    DEPARTMENTS.value = res.data?.data?.departments ?? []
+    const [deptRes, rolesRes] = await Promise.all([fetchDepartments(), fetchAccountRoles()])
+    DEPARTMENTS.value = deptRes.data?.data?.departments ?? []
+    ACCOUNT_ROLES.value = rolesRes.data?.data?.account_roles ?? []
   } catch {
     // fallback：空陣列，讓表單仍可正常操作
   }
