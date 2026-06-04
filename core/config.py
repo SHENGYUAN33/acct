@@ -89,6 +89,8 @@ class Settings(BaseSettings):
     key_field_confidence_threshold: float = 0.8
     # LIFF 上傳 Session 過期時間（分鐘）
     liff_session_ttl_minutes: int = 30
+    # 孤立物品圖向前關聯的時間視窗（分鐘）：在此視窗內的最新報帳可被補入
+    orphan_window_minutes: int = 10
 
     # 部門清單：透過 .env 的 DEPARTMENTS 逗號分隔字串設定，無需重新部署
     departments: list[str] = [

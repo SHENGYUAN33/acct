@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import and_, select
 
+from core.config import settings
 from core.database import SessionLocal
 from models.expense import Expense
 from models.user_state import UserState
@@ -308,10 +309,10 @@ async def auto_split_process(
             len(groups), len(orphan_paths), line_user_id,
         )
 
-        # 處理孤立物品圖：向前關聯 10 分鐘內的最新報帳
+        # 處理孤立物品圖：向前關聯 ORPHAN_WINDOW_MINUTES 分鐘內的最新報帳
         if orphan_paths:
             resolved = relation_service.attach_orphan_images_to_recent_expense(
-                db, user_id, orphan_paths, window_minutes=10
+                db, user_id, orphan_paths, window_minutes=settings.orphan_window_minutes
             )
             if not resolved:
                 # 無可關聯的近期報帳 → 建立純物品圖報帳，標記為人工審核

@@ -461,7 +461,7 @@ async def process_session_background(
         # 處理孤立物品圖
         if orphan_paths:
             resolved = relation_service.attach_orphan_images_to_recent_expense(
-                db, user.id, orphan_paths, window_minutes=10
+                db, user.id, orphan_paths, window_minutes=settings.orphan_window_minutes
             )
             if not resolved:
                 try:
