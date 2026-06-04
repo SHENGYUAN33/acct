@@ -87,6 +87,8 @@ class Settings(BaseSettings):
     ocr_max_retries: int = 3
     # 關鍵稽核欄位信心閾值：低於此值 → NEEDS_MANUAL_REVIEW（0.0–1.0）
     key_field_confidence_threshold: float = 0.8
+    # LIFF 上傳 Session 過期時間（分鐘）
+    liff_session_ttl_minutes: int = 30
 
     # 部門清單：透過 .env 的 DEPARTMENTS 逗號分隔字串設定，無需重新部署
     departments: list[str] = [

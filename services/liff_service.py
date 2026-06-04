@@ -42,8 +42,8 @@ from services.auto_split_service import (
 
 logger = logging.getLogger(__name__)
 
-# LIFF Session TTL（分鐘），預設 30 分鐘
-LIFF_SESSION_TTL_MINUTES: int = 30
+# LIFF Session TTL（分鐘），由 LIFF_SESSION_TTL_MINUTES 環境變數控制
+LIFF_SESSION_TTL_MINUTES: int = settings.liff_session_ttl_minutes
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +114,7 @@ def _get_session_or_404(db: Session, session_id: uuid.UUID) -> UploadSession:
     if now > expires_at:
         session.status = "expired"
         db.commit()
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Session 已過期（TTL 30 分鐘）")
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail=f"Session 已過期（TTL {LIFF_SESSION_TTL_MINUTES} 分鐘）")
     if session.status == "submitted":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Session 已送出，不可再上傳圖片")
     return session
