@@ -83,6 +83,8 @@ class Settings(BaseSettings):
 
     # OCR 並行控制：最多同時送出幾個 Gemini 請求（避免 RPM 429）
     ocr_max_concurrent: int = 3
+    # OCR 重試次數（含第一次；失敗後指數退避）
+    ocr_max_retries: int = 3
 
     # 部門清單：透過 .env 的 DEPARTMENTS 逗號分隔字串設定，無需重新部署
     departments: list[str] = [

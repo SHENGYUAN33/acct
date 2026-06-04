@@ -287,7 +287,7 @@ async def classify_and_extract(image_path: str | Path | dict | list) -> VoucherO
 
 async def classify_and_extract_with_retry(
     image_path: str | Path,
-    max_retries: int = 3,
+    max_retries: int = settings.ocr_max_retries,
 ) -> VoucherOCRResult:
     """
     帶指數退避 retry 的 OCR 入口，同時受 _OCR_SEMAPHORE 限制並行數量。
