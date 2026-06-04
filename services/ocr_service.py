@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 # Initialise Gemini client once at import time
 _client = genai.Client(api_key=settings.gemini_api_key)
 
-# 最多同時送出 3 個 Gemini 請求（避免 RPM 429）
-_OCR_SEMAPHORE = asyncio.Semaphore(3)
+# 最多同時送出的 Gemini 請求數（由 OCR_MAX_CONCURRENT 控制）
+_OCR_SEMAPHORE = asyncio.Semaphore(settings.ocr_max_concurrent)
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
 

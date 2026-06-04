@@ -81,6 +81,9 @@ class Settings(BaseSettings):
     # 排程時區（需與伺服器部署時區一致）
     scheduled_batch_timezone: str = "Asia/Taipei"
 
+    # OCR 並行控制：最多同時送出幾個 Gemini 請求（避免 RPM 429）
+    ocr_max_concurrent: int = 3
+
     # 部門清單：透過 .env 的 DEPARTMENTS 逗號分隔字串設定，無需重新部署
     departments: list[str] = [
         "製片組_一般", "製片組_場景",
