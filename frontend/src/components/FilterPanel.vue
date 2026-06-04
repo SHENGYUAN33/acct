@@ -1,7 +1,8 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { SlidersHorizontal, Search, X } from 'lucide-vue-next'
 import { useExpenseStore } from '../stores/expenseStore'
+import { fetchDepartments } from '../api/configApi'
 
 const store = useExpenseStore()
 
@@ -15,7 +16,16 @@ const statusOptions = [
   { value: 'REPLACED_VOID', label: '已作廢' },
 ]
 
-const deptOptions = ['製片組', '美術組', '攝影組', '燈光組', '其他']
+const deptOptions = ref([])
+
+onMounted(async () => {
+  try {
+    const res = await fetchDepartments()
+    deptOptions.value = res.data?.data?.departments ?? []
+  } catch {
+    // fallback：空陣列
+  }
+})
 
 const categoryOptions = [
   { value: '', label: '全部類別' },

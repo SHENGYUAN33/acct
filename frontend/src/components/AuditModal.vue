@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useExpenseStore } from '../stores/expenseStore'
 import { fetchExpenseImages, updateExpenseImage } from '../api/expenseApi'
 import { getRosterList } from '../api/rosterApi'
+import { fetchDepartments } from '../api/configApi'
 import { toast } from 'vue3-toastify'
 import {
   ImagePlus,
@@ -174,8 +175,17 @@ async function loadRosterEmployees() {
   }
 }
 
-onMounted(() => {
+// ── 選項清單 ────────────────────────────────────────────────────
+const deptOptions = ref([])
+
+onMounted(async () => {
   if (localStorage.getItem('acctassist_token')) loadRosterEmployees()
+  try {
+    const res = await fetchDepartments()
+    deptOptions.value = res.data?.data?.departments ?? []
+  } catch {
+    // fallback：空陣列
+  }
 })
 
 // 選擇費用提報者後自動帶入其組別
@@ -189,9 +199,6 @@ watch(
     }
   }
 )
-
-// ── 選項清單 ────────────────────────────────────────────────────
-const deptOptions = ['製片組', '美術組', '攝影組', '燈光組', '其他']
 const certificateTypes = ['發票', '收據', '勞報', '押金', '退貨', '車票', '其他']
 
 // ── 退回單據對話框 ───────────────────────────────────────────────

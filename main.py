@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from core.config import settings
 from core.database import Base, check_db_connection, engine
 from models import admin_user, liff_session, staff_roster, system_setting  # noqa: F401
-from routers import admin, auth, expenses, liff, roster, webhook
+from routers import admin, auth, config, expenses, liff, roster, webhook
 from core.database import SessionLocal
 from services import line_service
 from services.scheduler import get_scheduled_jobs, start_scheduler, stop_scheduler
@@ -42,6 +42,7 @@ app.add_middleware(
 # Routers
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(config.router)
 app.include_router(webhook.router)
 app.include_router(expenses.router)
 app.include_router(roster.router)

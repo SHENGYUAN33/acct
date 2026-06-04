@@ -82,7 +82,14 @@ class Settings(BaseSettings):
     scheduled_batch_timezone: str = "Asia/Taipei"
 
     # 部門清單：透過 .env 的 DEPARTMENTS 逗號分隔字串設定，無需重新部署
-    departments: list[str] = ["製片組", "美術組", "攝影組", "燈光組", "其他"]
+    departments: list[str] = [
+        "製片組_一般", "製片組_場景",
+        "美術組_一般", "美術組_置景", "美術組_陳設", "美術組_道具",
+        "造型組_梳化", "造型組_服裝",
+        "演員管理組", "特化組", "特效組", "攝影組", "燈光組", "場務組",
+        "收音組", "劇本組", "導演組", "演員組", "航拍組",
+        "檔案管理組", "後期剪輯", "後期特效", "公司組",
+    ]
 
     @field_validator("scheduled_batch_times", mode="before")
     @classmethod

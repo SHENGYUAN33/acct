@@ -12,12 +12,10 @@ import {
   downloadRosterTemplate,
   exportRosterCSV,
 } from '../api/rosterApi'
+import { fetchDepartments } from '../api/configApi'
 
-// ── 組別選項（與 LINE Bot Onboarding 一致） ──────────────────────
-const DEPARTMENTS = [
-  '製片組', '攝影組', '燈光組', '美術組', '道具組',
-  '服裝組', '化妝組', '剪接組', '音效組', '行政組',
-]
+// ── 組別選項（從後端 /api/v1/config/departments 動態載入，與 .env DEPARTMENTS 同步） ──
+const DEPARTMENTS = ref([])
 
 const ACCOUNT_ROLES = ['一般員工', '管理員']
 
@@ -312,7 +310,15 @@ function formatDate(dateStr) {
   }
 }
 
-onMounted(() => fetchRoster(0))
+onMounted(async () => {
+  fetchRoster(0)
+  try {
+    const res = await fetchDepartments()
+    DEPARTMENTS.value = res.data?.data?.departments ?? []
+  } catch {
+    // fallback：空陣列，讓表單仍可正常操作
+  }
+})
 </script>
 
 <template>
