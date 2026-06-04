@@ -90,7 +90,7 @@ export const useExpenseStore = defineStore('expense', () => {
 
   // 分頁
   const currentPage = ref(1)
-  const pageSize = ref(100)
+  const pageSize = ref(Number(import.meta.env.VITE_DEFAULT_PAGE_SIZE) || 100)
 
   // 勾選狀態（用 Set 儲存已勾選的 expense id）
   const checkedIds = ref(new Set())
