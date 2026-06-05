@@ -15,3 +15,19 @@ export const fetchDepartments = () =>
  */
 export const fetchAccountRoles = () =>
   apiClient.get('/api/v1/config/account-roles')
+
+/**
+ * GET /api/v1/config/expense-categories
+ * 取得費用父子科目完整清單（公開端點，不需 JWT）
+ * @returns {Promise<{parents: Array}>} 父科目陣列，每項含 key/label/note/children
+ */
+export const fetchExpenseCategories = () =>
+  apiClient.get('/api/v1/config/expense-categories')
+
+/**
+ * GET /api/v1/config/voucher-categories
+ * 取得憑證類別清單（公開端點，不需 JWT）
+ * @returns {Promise<{voucher_categories: Array}>} 憑證類別陣列，每項含 key/label
+ */
+export const fetchVoucherCategories = () =>
+  apiClient.get('/api/v1/config/voucher-categories')

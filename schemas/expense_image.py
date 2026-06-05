@@ -12,9 +12,11 @@ class ExpenseImageRead(BaseModel):
     image_url: str
     is_voucher: bool
     voucher_category: str | None
-    # 子類型：HSR_TICKET / FUEL / EXEMPT_INVOICE 等（新增欄位）
+    # 子類型：HSR_TICKET / FUEL / EXEMPT_INVOICE 等
     voucher_subtype: str | None = None
-    # 費用科目：MEAL / STATIONERY / TRANSPORTATION 等（新增欄位）
+    # 費用父科目 key（15 種）：TRANSPORTATION / MEAL / RENTAL 等
+    expense_parent_category: str | None = None
+    # 費用子科目中文名稱：高鐵／台鐵／客運／遊覽車、餐飲費 等
     expense_category: str | None = None
     sequence_order: int
     # JSON 字串，對應完整 VoucherOCRResult（含推理說明與信心分數）
@@ -30,6 +32,7 @@ class ExpenseImageUpdate(BaseModel):
     is_voucher: bool | None = None
     voucher_category: str | None = None
     voucher_subtype: str | None = None
+    expense_parent_category: str | None = None
     expense_category: str | None = None
 
 

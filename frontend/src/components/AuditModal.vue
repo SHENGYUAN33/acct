@@ -1,9 +1,9 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useExpenseStore } from '../stores/expenseStore'
 import { fetchExpenseImages, updateExpenseImage } from '../api/expenseApi'
 import { getRosterList } from '../api/rosterApi'
-import { fetchDepartments } from '../api/configApi'
+import { fetchDepartments, fetchExpenseCategories, fetchVoucherCategories } from '../api/configApi'
 import { toast } from 'vue3-toastify'
 import {
   ImagePlus,
@@ -23,56 +23,72 @@ const store = useExpenseStore()
 // 後端 Base URL（供子圖片拼接完整路徑）
 const BACKEND_BASE_URL = API_BASE_URL
 
-// 憑證類別代碼對應中文名稱
-const CATEGORY_LABEL = {
-  INVOICE: '發票',
-  RECEIPT: '收據',
-  LABOR_SERVICE: '勞報',
-  TRANSPORTATION: '交通',
-  CREDIT_NOTE: '退貨折讓',
-  INSURANCE: '保險',
-  UTILITY: '水電',
-  RENTAL: '租金',
-  ACCOMMODATION: '住宿',
-  POSTAGE: '郵資',
-}
-
-const VOUCHER_CATEGORY_OPTIONS = [
+// 憑證類別代碼對應中文名稱（動態載入，預設值供 fallback）
+const voucherCategoryOptions = ref([
   { value: 'INVOICE', label: '發票' },
   { value: 'RECEIPT', label: '收據' },
-  { value: 'LABOR_SERVICE', label: '勞報' },
-  { value: 'TRANSPORTATION', label: '交通' },
-  { value: 'CREDIT_NOTE', label: '退貨折讓' },
-  { value: 'INSURANCE', label: '保險' },
-  { value: 'UTILITY', label: '水電' },
-  { value: 'RENTAL', label: '租金' },
-  { value: 'ACCOMMODATION', label: '住宿' },
-  { value: 'POSTAGE', label: '郵資' },
-]
-
-const EXPENSE_CATEGORY_OPTIONS = [
-  { value: 'MEAL', label: '餐費' },
-  { value: 'TRANSPORTATION', label: '交通費' },
-  { value: 'STATIONERY', label: '文具' },
-  { value: 'INSURANCE', label: '保險' },
-  { value: 'UTILITY', label: '水電' },
-  { value: 'ACCOMMODATION', label: '住宿' },
+  { value: 'LABOR_FORM', label: '勞報單' },
+  { value: 'DEPOSIT', label: '押金' },
+  { value: 'RETURN', label: '退貨' },
   { value: 'OTHER', label: '其他' },
-]
+])
 
-// ── 圖片分類編輯狀態 ─────────────────────────────────────────────
+// 費用父子科目（動態載入）
+const expenseCategoryParents = ref([])
+
+// ── 圖片分類編輯狀態（必須在依賴它的 computed 之前宣告）──────────
 const editingImageId = ref(null)
 const editImageForm = ref({})
 const isSavingImageClass = ref(false)
+let _suppressParentWatch = false
+
+// 根據父科目 key 取得子科目清單
+const expenseCategoryChildren = computed(() => {
+  const parentKey = editImageForm.value.expense_parent_category
+  if (!parentKey) return []
+  const parent = expenseCategoryParents.value.find(p => p.key === parentKey)
+  return parent?.children ?? []
+})
+
+// 父科目下拉選項
+const expenseParentOptions = computed(() =>
+  expenseCategoryParents.value.map(p => ({ value: p.key, label: p.label }))
+)
+
+// 憑證類別 key → label 查找（供 View mode badge 顯示）
+const voucherCategoryLabel = computed(() => {
+  const map = {}
+  voucherCategoryOptions.value.forEach(o => { map[o.value] = o.label })
+  return map
+})
+
+// 父科目 key → label 查找（供 View mode badge 顯示）
+const parentCategoryLabel = computed(() => {
+  const map = {}
+  expenseCategoryParents.value.forEach(p => { map[p.key] = p.label })
+  return map
+})
 
 function startEditImage(img) {
+  _suppressParentWatch = true
   editingImageId.value = img.id
   editImageForm.value = {
     is_voucher: img.is_voucher,
     voucher_category: img.voucher_category ?? '',
+    expense_parent_category: img.expense_parent_category ?? '',
     expense_category: img.expense_category ?? '',
   }
+  nextTick(() => { _suppressParentWatch = false })
 }
+
+// 父科目切換時清空子科目（startEditImage 呼叫期間暫停，避免誤清 OCR 已填的值）
+watch(
+  () => editImageForm.value.expense_parent_category,
+  () => {
+    if (_suppressParentWatch) return
+    editImageForm.value.expense_category = ''
+  }
+)
 
 function cancelEditImage() {
   editingImageId.value = null
@@ -82,12 +98,38 @@ async function saveImageClassification(img) {
   isSavingImageClass.value = true
   try {
     const payload = { ...editImageForm.value }
-    for (const k of ['voucher_category', 'expense_category']) {
+    const oldIsVoucher = img.is_voucher
+    for (const k of ['voucher_category', 'expense_parent_category', 'expense_category']) {
       if (payload[k] === '') payload[k] = null
     }
     await updateExpenseImage(form.value.id, img.id, payload)
+
+    // 更新子圖片本地狀態
     const idx = subImages.value.findIndex(i => i.id === img.id)
     if (idx !== -1) subImages.value[idx] = { ...subImages.value[idx], ...payload }
+
+    // 若 is_voucher 改變，同步更新費用影像 / 物品影像輪播陣列
+    const newIsVoucher = payload.is_voucher ?? oldIsVoucher
+    if (newIsVoucher !== oldIsVoucher) {
+      const fullUrl = img.image_url.startsWith('http')
+        ? img.image_url
+        : `${BACKEND_BASE_URL}/${img.image_url}`
+      if (oldIsVoucher) {
+        form.value.image_url = (form.value.image_url || []).filter(u => u !== fullUrl)
+        form.value.item_image_url = [...(form.value.item_image_url || []), fullUrl]
+      } else {
+        form.value.item_image_url = (form.value.item_image_url || []).filter(u => u !== fullUrl)
+        form.value.image_url = [...(form.value.image_url || []), fullUrl]
+      }
+      activeExpenseIdx.value = Math.min(activeExpenseIdx.value, Math.max(0, (form.value.image_url || []).length - 1))
+      activeItemIdx.value = Math.min(activeItemIdx.value, Math.max(0, (form.value.item_image_url || []).length - 1))
+    }
+
+    // 從子圖片重新計算左側憑證類別顯示
+    form.value.voucher_categories = subImages.value
+      .filter(i => i.is_voucher && i.voucher_category)
+      .map(i => voucherCategoryLabel.value[i.voucher_category] ?? i.voucher_category)
+
     editingImageId.value = null
     toast.success('分類已更新')
   } catch {
@@ -181,10 +223,21 @@ const deptOptions = ref([])
 onMounted(async () => {
   if (localStorage.getItem('acctassist_token')) loadRosterEmployees()
   try {
-    const res = await fetchDepartments()
-    deptOptions.value = res.data?.data?.departments ?? []
+    const [deptRes, catRes, vcRes] = await Promise.all([
+      fetchDepartments(),
+      fetchExpenseCategories(),
+      fetchVoucherCategories(),
+    ])
+    deptOptions.value = deptRes.data?.data?.departments ?? []
+    expenseCategoryParents.value = catRes.data?.data?.parents ?? []
+    if (vcRes.data?.data?.voucher_categories?.length) {
+      voucherCategoryOptions.value = vcRes.data.data.voucher_categories.map(c => ({
+        value: c.key,
+        label: c.label,
+      }))
+    }
   } catch {
-    // fallback：空陣列
+    // fallback：使用預設值
   }
 })
 
@@ -407,12 +460,6 @@ function parseOcrFields(ocrResult) {
   } catch {
     return null
   }
-}
-
-// 子圖片 voucher_category 對應中文
-function getCategoryLabel(code) {
-  if (!code) return null
-  return CATEGORY_LABEL[code] ?? code
 }
 
 // ── 重新辨識 ─────────────────────────────────────────────────────
@@ -728,7 +775,7 @@ function formatDateTime(val) {
                   <label class="block text-sm text-gray-600">憑證類別：</label>
                   <div class="bg-gray-100 border border-gray-200 rounded px-3 py-2 text-sm text-gray-600 min-h-[38px]">
                     <template v-if="form.voucher_categories && form.voucher_categories.length > 0">
-                      {{ form.voucher_categories.map(c => CATEGORY_LABEL[c] ?? c).join('、') }}
+                      {{ form.voucher_categories.map(c => voucherCategoryLabel[c] ?? c).join('、') }}
                     </template>
                     <template v-else>
                       {{ form.certificate_type || '-' }}
@@ -990,13 +1037,16 @@ function formatDateTime(val) {
                             v-if="img.voucher_category"
                             class="ml-1 inline-block bg-blue-100 text-blue-700 text-xs font-medium px-2 py-0.5 rounded"
                           >
-                            {{ getCategoryLabel(img.voucher_category) }}
+                            {{ voucherCategoryLabel[img.voucher_category] ?? img.voucher_category }}
                           </span>
-                          <!-- expense_category badge -->
+                          <!-- expense parent + child badge -->
                           <span
                             v-if="img.expense_category"
                             class="ml-1 inline-block bg-purple-100 text-purple-700 text-xs font-medium px-2 py-0.5 rounded"
                           >
+                            <template v-if="img.expense_parent_category && parentCategoryLabel[img.expense_parent_category]">
+                              {{ parentCategoryLabel[img.expense_parent_category] }} &gt;
+                            </template>
                             {{ img.expense_category }}
                           </span>
                           <!-- OCR 細項 -->
@@ -1049,21 +1099,35 @@ function formatDateTime(val) {
                               class="w-full text-xs border border-gray-300 rounded px-2 py-1 disabled:opacity-40"
                             >
                               <option value="">— 未設定 —</option>
-                              <option v-for="opt in VOUCHER_CATEGORY_OPTIONS" :key="opt.value" :value="opt.value">
+                              <option v-for="opt in voucherCategoryOptions" :key="opt.value" :value="opt.value">
                                 {{ opt.label }}
                               </option>
                             </select>
                           </div>
-                          <!-- expense_category -->
+                          <!-- expense_parent_category -->
                           <div>
-                            <label class="block text-xs text-gray-500 mb-0.5">費用科目</label>
+                            <label class="block text-xs text-gray-500 mb-0.5">費用科目（父）</label>
                             <select
-                              v-model="editImageForm.expense_category"
+                              v-model="editImageForm.expense_parent_category"
                               class="w-full text-xs border border-gray-300 rounded px-2 py-1"
                             >
                               <option value="">— 未設定 —</option>
-                              <option v-for="opt in EXPENSE_CATEGORY_OPTIONS" :key="opt.value" :value="opt.value">
+                              <option v-for="opt in expenseParentOptions" :key="opt.value" :value="opt.value">
                                 {{ opt.label }}
+                              </option>
+                            </select>
+                          </div>
+                          <!-- expense_category（子，根據父科目動態篩選） -->
+                          <div>
+                            <label class="block text-xs text-gray-500 mb-0.5">費用科目（子）</label>
+                            <select
+                              v-model="editImageForm.expense_category"
+                              :disabled="!editImageForm.expense_parent_category"
+                              class="w-full text-xs border border-gray-300 rounded px-2 py-1 disabled:opacity-40"
+                            >
+                              <option value="">— 未設定 —</option>
+                              <option v-for="child in expenseCategoryChildren" :key="child.key" :value="child.label">
+                                {{ child.label }}
                               </option>
                             </select>
                           </div>

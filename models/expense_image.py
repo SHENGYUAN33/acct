@@ -26,12 +26,13 @@ class ExpenseImage(Base):
 
     image_url: Mapped[str] = mapped_column(String(512), nullable=False)
     is_voucher: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # 頂層文件類型：INVOICE / RECEIPT / LABOR_SERVICE / TRANSPORTATION /
-    #               CREDIT_NOTE / INSURANCE / UTILITY / RENTAL / ACCOMMODATION / POSTAGE
+    # 憑證類型：INVOICE / RECEIPT / LABOR_FORM / DEPOSIT / RETURN / OTHER
     voucher_category: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # 子類型：HSR_TICKET / FUEL / EXEMPT_INVOICE / WORK_INJURY / WATER 等
+    # 子類型（OCR 內部用）：HSR_TICKET / FUEL / EXEMPT_INVOICE 等
     voucher_subtype: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # 費用科目：MEAL / STATIONERY / TRANSPORTATION / INSURANCE / UTILITY 等
+    # 費用父科目 key（15 種）：MEAL / RENTAL / TRANSPORTATION / UTILITY 等
+    expense_parent_category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # 費用子科目中文名稱，e.g. 「高鐵／台鐵／客運／遊覽車」「餐飲費」
     expense_category: Mapped[str | None] = mapped_column(String(64), nullable=True)
     sequence_order: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     # JSON 字串格式的完整 OCR 結果（VoucherOCRResult.model_dump_json 序列化）

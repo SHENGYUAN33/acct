@@ -867,6 +867,7 @@ def create_batch_expense(
             is_voucher=ocr_result.is_voucher if ocr_result.success else False,
             voucher_category=ocr_result.voucher_category if ocr_result.success else None,
             voucher_subtype=ocr_result.voucher_subtype if ocr_result.success else None,
+            expense_parent_category=ocr_result.expense_parent_category if ocr_result.success else None,
             expense_category=ocr_result.expense_category if ocr_result.success else None,
             ocr_confidence=ocr_result.overall_confidence if ocr_result.success else None,
             sequence_order=seq,
@@ -1059,6 +1060,15 @@ def update_expense_image(
             dst_list.append(image.image_url)
             expense.item_image_url = src_list
             expense.image_url = dst_list
+
+    # 同步 Expense 層級的 voucher_categories / expense_categories 彙總欄位
+    all_images = db.query(ExpenseImage).filter(ExpenseImage.expense_id == expense_id).all()
+    expense.voucher_categories = json.dumps(
+        [img.voucher_category for img in all_images if img.is_voucher and img.voucher_category]
+    )
+    expense.expense_categories = json.dumps(
+        [img.expense_category for img in all_images if img.expense_category]
+    )
 
     db.commit()
     db.refresh(image)

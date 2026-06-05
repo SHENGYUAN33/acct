@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from fastapi import APIRouter
 
 from core.config import settings
@@ -10,6 +12,12 @@ router = APIRouter(
     prefix="/api/v1/config",
     tags=["config"],
 )
+
+_CATEGORIES_PATH = Path(__file__).parent.parent / "config" / "expense_categories.json"
+
+
+def _load_expense_categories() -> dict:
+    return json.loads(_CATEGORIES_PATH.read_text(encoding="utf-8"))
 
 
 @router.get("/departments")
@@ -28,5 +36,27 @@ def get_account_roles() -> dict:
     return {
         "status": "success",
         "data": {"account_roles": settings.account_roles},
+        "message": "",
+    }
+
+
+@router.get("/expense-categories")
+def get_expense_categories() -> dict:
+    """回傳費用父子科目完整清單（由 config/expense_categories.json 控制）。"""
+    data = _load_expense_categories()
+    return {
+        "status": "success",
+        "data": {"parents": data["parents"]},
+        "message": "",
+    }
+
+
+@router.get("/voucher-categories")
+def get_voucher_categories() -> dict:
+    """回傳憑證類別清單（由 config/expense_categories.json 控制）。"""
+    data = _load_expense_categories()
+    return {
+        "status": "success",
+        "data": {"voucher_categories": data["voucher_categories"]},
         "message": "",
     }

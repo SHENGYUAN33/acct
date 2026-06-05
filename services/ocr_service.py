@@ -29,64 +29,85 @@ MULTI_TASK_PROMPT = """你是一個具備台灣會計知識的財務審計助理
 觀察圖片上的所有視覺線索：店名、品項、格式、印章、色彩、LOGO、版面配置、印刷字體。
 根據這些線索推斷「這筆費用最可能發生在什麼場景」，在 scene_reasoning 欄位用一句話說明你的推理過程。
 
-主分類判斷基準（voucher_category）：
-  INVOICE       → 印有「統一發票」字樣，有字軌號碼（如 AB-12345678）
-  RECEIPT       → 收據、收銀紙、手寫收據（無統一發票字軌）
-  LABOR_SERVICE → 勞務報酬單、演出費、稿費單；手寫金額+身分證字號
-  TRANSPORTATION→ 任何交通運輸相關票根、收據、截圖
-  CREDIT_NOTE   → 退貨折讓證明，或含「折讓」、負數金額的單據
-  INSURANCE     → 保險費收據、保費通知書、保單附件
-  UTILITY       → 電費、水費、瓦斯費、網路費、電信費、管理費帳單
-  RENTAL        → 場地/辦公室/設備/車輛 租賃合約或收據
-  ACCOMMODATION → 飯店、民宿帳單（含 check-in / check-out 資訊）
-  POSTAGE       → 郵局收據、快遞單、掛號收據
+━━ 步驟 1A：憑證類型（voucher_category）━━
+  INVOICE    → 印有「統一發票」字樣，有字軌號碼（如 AB-12345678）
+  RECEIPT    → 收據、收銀紙、手寫收據（無統一發票字軌）
+  LABOR_FORM → 勞務報酬單；含手寫金額＋身分證字號＋收款人簽章
+  DEPOSIT    → 押金收據、訂金收據
+  RETURN     → 退貨折讓證明，或含「折讓」、負數金額的單據
+  OTHER      → 無法歸入以上任何類型
 
-子類型判斷基準（voucher_subtype）：
-  RECEIPT       → EXEMPT_INVOICE（有「免用統一發票」圓形橡皮章）/ GENERAL（無）
-  TRANSPORTATION→
+子類型（voucher_subtype，僅 RECEIPT 與 INVOICE 適用）：
+  RECEIPT   → EXEMPT_INVOICE（有「免用統一發票」圓形橡皮章）/ GENERAL（無）
+  交通相關收據（voucher_category=RECEIPT）子類型：
     HSR_TICKET     高鐵票根（實體票/電子票/優惠票）
     HSR_RECORD     高鐵 App 乘車記錄截圖
-    HSR_SUPPLEMENT 高鐵補票收據（印有「補票」）
-    TAIWAN_RAILWAY 台灣鐵路票根（印有「台灣鐵路」或台鐵 LOGO）
+    HSR_SUPPLEMENT 高鐵補票收據
+    TAIWAN_RAILWAY 台灣鐵路票根
     BUS            客運車票或收據
     CHARTER_BUS    遊覽車包車收據或合約
-    TAXI           計程車收據（印有車號、「計程車」或「乘客收據」）
-    PARKING        停車場收據（印有「停車」或「計時」）
+    TAXI           計程車收據
+    PARKING        停車場收據
     TOLL_ETC       ETC 收據或過路費收據
-    FUEL           加油站收據（印有油品、公升數、油站名稱）
-    FINE           交通罰單（印有「違規罰鍰」、「舉發」或警察/監理機關字樣）
-    UBER           Uber 行程收據（印有 Uber 字樣）
-    GENERAL        捷運票、其他不符上述的交通單據
-  INSURANCE     → WORK_INJURY / ACCIDENT / LIFE
-  UTILITY       → WATER / ELECTRICITY / WATER_ELECTRICITY / GAS / TELECOM / INTERNET / MANAGEMENT_FEE
-  RENTAL        → VENUE / OFFICE / OFFICE_EQUIPMENT / VEHICLE
-  其餘分類無子類型，voucher_subtype 填 null
+    FUEL           加油站收據
+    FINE           交通罰單
+    UBER           Uber 行程收據
+    GENERAL        捷運票、其他交通單據
+  其餘類型 voucher_subtype 填 null
 
-費用科目判斷（expense_category）：
-  根據文件**內容**（店名、品項、金額類型）推斷會計科目：
-  MEAL            餐廳、便當、咖啡廳、飲料店
-  ACCOMMODATION   飯店、民宿
-  VENUE_RENTAL    場地租借
-  OFFICE_RENTAL   辦公室月租
-  EQUIPMENT_RENTAL 設備、辦公用品租借
-  VEHICLE_RENTAL  租車
-  UTILITY         水電瓦斯網路費
-  STATIONERY      文具、辦公耗材、印刷
-  POSTAGE         郵資、快遞
-  TRANSPORTATION  所有交通費
-  INSURANCE       保險費
-  LABOR           勞務費
-  GENERAL         無法歸入以上任何類別
+━━ 步驟 1B：費用父科目（expense_parent_category）━━
+從以下 15 個父科目選一，填入對應的 key：
+
+  MEAL           → 餐廳、便當、咖啡廳、飲料；誤餐補貼；飲用水
+  RENTAL         → 場地/攝影棚租借；辦公室租金；辦公用品租金；車輛租金
+  TRANSPORTATION → 所有交通費（高鐵/台鐵/客運/遊覽車/計程車/油資/停車/過路/罰單）
+  UTILITY        → 電費、水費、瓦斯費、電信費、網路費
+  ACCOMMODATION  → 飯店、民宿、旅館帳單（含 check-in/check-out）
+  OFFICE_SUPPLY  → 文具、辦公耗材、印刷、郵資、快遞
+  PRODUCTION_SUPPLIES → 無法歸入以上任何類別（預設 catch-all）
+  LABOR          → 勞務報酬單；薪資/薪水/人員費用
+  PERFORMANCE    → 演員費、臨演費（勞報單格式）
+  ENTERTAINMENT  → 交際餐敘、公關費用
+  ART            → 置景/陳設耗材；美術道具（購買/租金）；劇本費
+  COSTUME        → 造型化妝費；特殊化妝費；服裝（購買/租金）
+  EQUIPMENT      → 場務/燈光/攝影/收音/航拍器材（購買或遺失損壞申報）
+  POST_PROD      → 剪接製作費；特效素材費；硬碟/記憶卡等檔管物品
+  HR_WELFARE     → 職工福利；保險費
+
+━━ 步驟 1C：費用子科目（expense_category）━━
+根據步驟 1B 選出的父科目，從對應子清單選一，填入**中文名稱**：
+
+  MEAL         → 餐飲費 / 誤餐費 / 飲用水
+  RENTAL       → 場地租金 / 辦公室租金 / 辦公室用品租金 / 車輛租金
+  TRANSPORTATION →
+    高鐵/台鐵/客運/遊覽車 / 計程車資 / 過路費 / 停車費 / 油資 / 罰單
+  UTILITY      → 水電瓦斯費 / 電信／網路費
+  ACCOMMODATION→ 住宿費
+  OFFICE_SUPPLY→ 文具用品 / 郵電費
+  PRODUCTION_SUPPLIES → 現場拍攝用品購買（預設，無法判斷時填此）
+  MISC         → 雜費（由審核者主動選擇）
+  LABOR        → 勞務費
+  PERFORMANCE  → 演出費 / 臨演演出費
+  ENTERTAINMENT→ 交際費
+  ART          → 置景材料耗材費 / 陳設材料耗材費 / 美術道具費 / 美術道具租金 / 劇本費
+  COSTUME      → 造型化妝費 / 特殊化妝費 / 服裝費 / 服裝租金
+  EQUIPMENT    → 場務器材費 / 場務遺失及損壞 / 燈光費 / 燈光遺失及損壞 /
+                  攝影費 / 攝影遺失及損壞 / 收音器材費 / 收音遺失及損壞 /
+                  航拍器材費 / 航拍遺失及損壞
+  POST_PROD    → 剪接製作費 / 特效素材費 / 檔管物品購置
+  HR_WELFARE   → 職工福利 / 保險費
+
+  **重要：若無法判斷子科目，expense_parent_category 填 PRODUCTION_SUPPLIES，expense_category 填「現場拍攝用品購買」**
 
 場景推理範例：
-  - 「店名含『中油、台塑石化、全國加油』→ 加油站 → TRANSPORTATION/FUEL, expense_category=TRANSPORTATION」
-  - 「品項含飯、便當、套餐、飲料 → 餐飲 → expense_category=MEAL」
-  - 「版面含 Check-in/Check-out 日期與房號 → 飯店帳單 → ACCOMMODATION」
-  - 「有買方統一編號已填入 → B2B 公司採購發票 → INVOICE」
-  - 「遊覽車公司名稱 + 座位數 → TRANSPORTATION/CHARTER_BUS」
-  - 「手寫金額 + 身分證字號 + 收款人簽章 → LABOR_SERVICE」
-  - 「台電格式帳單 + 用電度數 → UTILITY/ELECTRICITY」
-  - 「文具四件、A4 影印紙 × 10 包 → expense_category=STATIONERY」
+  - 「店名含『中油、台塑石化、全國加油』→ 加油站 → voucher_category=RECEIPT, expense_parent_category=TRANSPORTATION, expense_category=油資」
+  - 「品項含飯、便當、套餐 → 餐廳 → expense_parent_category=MEAL, expense_category=餐飲費」
+  - 「版面含 Check-in/Check-out 日期與房號 → 飯店 → voucher_category=RECEIPT, expense_parent_category=ACCOMMODATION, expense_category=住宿費」
+  - 「有買方統一編號已填入 → B2B 公司採購發票 → voucher_category=INVOICE」
+  - 「手寫金額＋身分證字號＋收款人簽章 → 勞報單 → voucher_category=LABOR_FORM, expense_parent_category=LABOR, expense_category=勞務費」
+  - 「台電格式帳單 + 用電度數 → voucher_category=RECEIPT, expense_parent_category=UTILITY, expense_category=水電瓦斯費」
+  - 「文具四件、A4 影印紙 → expense_parent_category=OFFICE_SUPPLY, expense_category=文具用品」
+  - 「五金行收據、商品名稱不明 → 無法確定部門 → expense_parent_category=PRODUCTION_SUPPLIES, expense_category=現場拍攝用品購買」
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【步驟二：欄位萃取與合理性推論】

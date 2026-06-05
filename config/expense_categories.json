@@ -1,0 +1,172 @@
+{
+  "parents": [
+    {
+      "key": "MEAL",
+      "label": "勞-餐飲費",
+      "note": "餐飲費不能報營業稅",
+      "children": [
+        { "key": "MEAL_GENERAL", "label": "餐飲費" },
+        { "key": "MEAL_OVERTIME", "label": "誤餐費" },
+        { "key": "DRINKING_WATER", "label": "飲用水" }
+      ]
+    },
+    {
+      "key": "RENTAL",
+      "label": "勞-租金類",
+      "note": "辦公室租金不能報營業稅及營所稅",
+      "children": [
+        { "key": "VENUE_RENTAL", "label": "場地租金" },
+        { "key": "OFFICE_RENTAL", "label": "辦公室租金" },
+        { "key": "OFFICE_EQUIPMENT_RENTAL", "label": "辦公室用品租金" },
+        { "key": "VEHICLE_RENTAL", "label": "車輛租金" }
+      ]
+    },
+    {
+      "key": "TRANSPORTATION",
+      "label": "勞-交通費",
+      "note": "計程車資未稅=含稅，營業稅=0；路邊停車費不能報營業稅",
+      "children": [
+        { "key": "TRANS_RAIL", "label": "高鐵/台鐵/客運/遊覽車" },
+        { "key": "TRANS_TAXI", "label": "計程車資" },
+        { "key": "TRANS_TOLL", "label": "過路費" },
+        { "key": "TRANS_PARKING", "label": "停車費" },
+        { "key": "TRANS_FUEL", "label": "油資" },
+        { "key": "TRANS_FINE", "label": "罰單" }
+      ]
+    },
+    {
+      "key": "UTILITY",
+      "label": "勞-水電通訊費",
+      "note": "水電瓦斯費、電信網路費皆不能報營業稅及營所稅",
+      "children": [
+        { "key": "UTILITY_WATER_ELEC", "label": "水電瓦斯費" },
+        { "key": "UTILITY_TELECOM", "label": "電信/網路費" }
+      ]
+    },
+    {
+      "key": "ACCOMMODATION",
+      "label": "勞-住宿費",
+      "note": null,
+      "children": [
+        { "key": "ACCOMMODATION_GENERAL", "label": "住宿費" }
+      ]
+    },
+    {
+      "key": "OFFICE_SUPPLY",
+      "label": "勞-辦公耗材",
+      "note": null,
+      "children": [
+        { "key": "STATIONERY", "label": "文具用品" },
+        { "key": "POSTAGE", "label": "郵電費" }
+      ]
+    },
+    {
+      "key": "PRODUCTION_SUPPLIES",
+      "label": "勞-現場拍攝用品",
+      "note": "OCR 無法判斷時的預設分類，審核者可再移至正確科目或改為雜費",
+      "children": [
+        { "key": "PRODUCTION_SUPPLIES_GENERAL", "label": "現場拍攝用品購買" }
+      ]
+    },
+    {
+      "key": "MISC",
+      "label": "勞-雜費",
+      "note": null,
+      "children": [
+        { "key": "MISC_GENERAL", "label": "雜費" }
+      ]
+    },
+    {
+      "key": "LABOR",
+      "label": "勞-勞務費",
+      "note": "整案工作人員統一報公司組；單日發通告的助理費用才各組自報",
+      "children": [
+        { "key": "LABOR_GENERAL", "label": "勞務費" }
+      ]
+    },
+    {
+      "key": "PERFORMANCE",
+      "label": "勞-演出費",
+      "note": null,
+      "children": [
+        { "key": "PERF_ACTOR", "label": "演出費" },
+        { "key": "PERF_EXTRA", "label": "臨演演出費" }
+      ]
+    },
+    {
+      "key": "ENTERTAINMENT",
+      "label": "勞-交際費",
+      "note": null,
+      "children": [
+        { "key": "ENTERTAINMENT_GENERAL", "label": "交際費" }
+      ]
+    },
+    {
+      "key": "ART",
+      "label": "勞-美術相關",
+      "note": null,
+      "children": [
+        { "key": "ART_SCENE_MATERIAL", "label": "置景材料耗材費" },
+        { "key": "ART_SET_MATERIAL", "label": "陳設材料耗材費" },
+        { "key": "ART_PROP_BUY", "label": "美術道具費" },
+        { "key": "ART_PROP_RENTAL", "label": "美術道具租金" },
+        { "key": "ART_SCRIPT", "label": "劇本費" }
+      ]
+    },
+    {
+      "key": "COSTUME",
+      "label": "勞-造型相關",
+      "note": null,
+      "children": [
+        { "key": "COSTUME_MAKEUP", "label": "造型化妝費" },
+        { "key": "COSTUME_SFX_MAKEUP", "label": "特殊化妝費" },
+        { "key": "COSTUME_BUY", "label": "服裝費" },
+        { "key": "COSTUME_RENTAL", "label": "服裝租金" }
+      ]
+    },
+    {
+      "key": "EQUIPMENT",
+      "label": "勞-現場器材",
+      "note": null,
+      "children": [
+        { "key": "EQUIP_GRIP", "label": "場務器材費" },
+        { "key": "EQUIP_GRIP_LOSS", "label": "場務遺失及損壞" },
+        { "key": "EQUIP_LIGHTING", "label": "燈光費" },
+        { "key": "EQUIP_LIGHTING_LOSS", "label": "燈光遺失及損壞" },
+        { "key": "EQUIP_CAMERA", "label": "攝影費" },
+        { "key": "EQUIP_CAMERA_LOSS", "label": "攝影遺失及損壞" },
+        { "key": "EQUIP_SOUND", "label": "收音器材費" },
+        { "key": "EQUIP_SOUND_LOSS", "label": "收音遺失及損壞" },
+        { "key": "EQUIP_DRONE", "label": "航拍器材費" },
+        { "key": "EQUIP_DRONE_LOSS", "label": "航拍遺失及損壞" }
+      ]
+    },
+    {
+      "key": "POST_PROD",
+      "label": "勞-後製相關",
+      "note": null,
+      "children": [
+        { "key": "POST_EDITING", "label": "剪接製作費" },
+        { "key": "POST_VFX", "label": "特效素材費" },
+        { "key": "POST_ARCHIVE", "label": "檔管物品購置" }
+      ]
+    },
+    {
+      "key": "HR_WELFARE",
+      "label": "勞-人事福利",
+      "note": "保險費不能報營業稅",
+      "children": [
+        { "key": "HR_WELFARE_GENERAL", "label": "職工福利" },
+        { "key": "HR_INSURANCE", "label": "保險費" }
+      ]
+    }
+  ],
+  "voucher_categories": [
+    { "key": "INVOICE", "label": "發票" },
+    { "key": "RECEIPT", "label": "收據" },
+    { "key": "LABOR_FORM", "label": "勞報單" },
+    { "key": "DEPOSIT", "label": "押金" },
+    { "key": "RETURN", "label": "退貨" },
+    { "key": "OTHER", "label": "其他" }
+  ]
+}

@@ -23,14 +23,16 @@ class VoucherOCRResult(BaseModel):
 
     # ── 分類 ────────────────────────────────────────────────────────────────
     is_voucher: bool = False
-    # 頂層文件類型：INVOICE / RECEIPT / LABOR_SERVICE / TRANSPORTATION /
-    #               CREDIT_NOTE / INSURANCE / UTILITY / RENTAL / ACCOMMODATION / POSTAGE
+    # 憑證類型：INVOICE / RECEIPT / LABOR_FORM / DEPOSIT / RETURN / OTHER
     voucher_category: str | None = None
-    # 子類型，例如 HSR_TICKET / FUEL / EXEMPT_INVOICE / WORK_INJURY / WATER_ELECTRICITY 等
+    # 子類型，例如 HSR_TICKET / FUEL / EXEMPT_INVOICE 等（OCR 內部用）
     voucher_subtype: str | None = None
-    # 費用科目：MEAL / ACCOMMODATION / VENUE_RENTAL / OFFICE_RENTAL /
-    #          EQUIPMENT_RENTAL / VEHICLE_RENTAL / UTILITY / STATIONERY /
-    #          POSTAGE / TRANSPORTATION / INSURANCE / LABOR / GENERAL
+    # 費用父科目 key（15 種）：MEAL / RENTAL / TRANSPORTATION / UTILITY /
+    #   ACCOMMODATION / OFFICE_SUPPLY / MISC / LABOR / PERFORMANCE /
+    #   ENTERTAINMENT / ART / COSTUME / EQUIPMENT / POST_PROD / HR_WELFARE
+    expense_parent_category: str | None = None
+    # 費用子科目中文名稱（對應 config/expense_categories.json children[].label）
+    # 無法判斷時填「現場拍攝用品購買」
     expense_category: str | None = None
 
     # ── GenAI 推理說明 ───────────────────────────────────────────────────────
