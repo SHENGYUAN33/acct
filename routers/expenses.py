@@ -2,9 +2,10 @@
 
 import csv
 import io
+import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal
@@ -40,10 +41,90 @@ UPLOADS_DIR.mkdir(exist_ok=True)
 # CSV 匯出欄位定義
 CSV_HEADERS = [
     "案件編號", "ID", "上傳者", "上傳者組別", "費用提報者", "費用提報者組別",
-    "上傳日期", "費用日期", "發票號碼", "含稅金額", "未稅金額", "營業稅額",
+    "上傳日期", "費用日期", "發票號碼", "憑證類別", "含稅金額", "未稅金額", "營業稅額",
     "賣方統編", "賣方公司", "項目說明", "憑證狀態", "退件原因",
     "建立時間", "更新時間",
 ]
+
+# 憑證類別中文對照
+VOUCHER_CATEGORY_ZH: dict[str, str] = {
+    "INVOICE": "發票",
+    "RECEIPT": "收據",
+    "TRANSPORTATION": "交通票據",
+    "ACCOMMODATION": "住宿",
+    "LABOR_SERVICE": "勞務費",
+    "UTILITY": "水電費",
+    "RENTAL": "租金",
+    "INSURANCE": "保險",
+    "POSTAGE": "郵資",
+    "CREDIT_NOTE": "折讓單",
+    "OTHER": "其他",
+}
+
+# 憑證狀態中文對照
+STATUS_ZH: dict[str, str] = {
+    "PENDING": "待審核",
+    "APPROVED": "已核准",
+    "REJECTED": "已退件",
+    "NEEDS_MANUAL_REVIEW": "需人工審核",
+    "SUPPLEMENTED": "已補件",
+    "WAITING_RETURN": "待退貨",
+    "COMPLETED": "已結清",
+    "REPLACED_VOID": "已作廢（沖銷）",
+}
+
+# 費用科目中文對照
+EXPENSE_CATEGORY_ZH: dict[str, str] = {
+    "MEAL": "餐費",
+    "TRANSPORTATION": "交通費",
+    "STATIONERY": "文具費",
+    "ACCOMMODATION": "住宿費",
+    "INSURANCE": "保險費",
+    "UTILITY": "水電費",
+    "RENTAL": "租金",
+    "LABOR_SERVICE": "勞務費",
+    "POSTAGE": "郵資",
+    "ENTERTAINMENT": "交際費",
+    "TRAINING": "訓練費",
+    "MEDICAL": "醫療費",
+    "OTHER": "其他",
+}
+
+# 進項稅額明細表欄位定義
+TAX_REPORT_HEADERS = [
+    "案件編號", "費用日期", "發票號碼", "憑證類型", "憑證子類型", "稅務類別",
+    "賣方統編", "賣方名稱", "稅前金額", "營業稅額", "含稅金額",
+    "費用科目", "上傳者", "上傳者組別", "項目說明", "使用者備註",
+    "憑證狀態", "備注",
+]
+
+
+def _classify_tax_type(voucher_category: str | None, voucher_subtype: str | None) -> str:
+    """依憑證類型與子類型對應台灣進項稅額申報書分類。"""
+    cat = (voucher_category or "").upper()
+    sub = (voucher_subtype or "").upper()
+
+    if cat == "INVOICE":
+        if sub == "EXEMPT_INVOICE":
+            return "免稅"
+        return "三聯式—一般稅額"
+    if cat == "RECEIPT":
+        return "二聯式/收據"
+    if cat == "TRANSPORTATION":
+        if sub == "FUEL":
+            return "油資—依法可扣"
+        return "交通票據"
+    if cat == "ACCOMMODATION":
+        return "住宿費"
+    if cat == "LABOR_SERVICE":
+        return "勞務費"
+    if cat == "UTILITY":
+        return "水電瓦斯費"
+    if cat == "RENTAL":
+        return "租金"
+    if cat == "INSURANCE":
+        return "保險費"
+    return "其他費用"
 
 
 # ── GET /expenses（列表）────────────────────────────────────────────
@@ -105,8 +186,9 @@ def export_expenses(
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     """匯出符合篩選條件的費用清單為 CSV 檔案。"""
+    # REPLACED_VOID（換單/換新發票舊記錄）也納入，以負數表示沖銷
     items = expense_service.get_expenses_for_export(
-        db, status=status, date_from=date_from, date_to=date_to, include_inactive=False
+        db, status=status, date_from=date_from, date_to=date_to, include_inactive=True
     )
 
     buf = io.StringIO()
@@ -115,6 +197,19 @@ def export_expenses(
     writer = csv.writer(buf)
     writer.writerow(CSV_HEADERS)
     for e in items:
+        # REPLACED_VOID（換單/換新發票作廢舊單）與 CREDIT_NOTE（折讓扣減）均顯示負數
+        is_void = (
+            e.status == ExpenseStatus.REPLACED_VOID
+            or e.relation_type == "CREDIT_NOTE"
+        )
+        sign = Decimal("-1") if is_void else Decimal("1")
+
+        def _fmt_amount(val: Decimal | None, _sign: Decimal = sign) -> str:
+            return str(val * _sign) if val is not None else ""
+
+        # REPLACED_VOID 時退件原因欄改填 void_reason（沖銷原因）
+        remark = (e.void_reason or e.reject_reason or "") if is_void else (e.reject_reason or "")
+
         writer.writerow([
             e.serial_number,
             str(e.id),
@@ -125,23 +220,136 @@ def export_expenses(
             e.upload_date.strftime("%Y-%m-%d %H:%M") if e.upload_date else "",
             str(e.expense_date) if e.expense_date else "",
             e.invoice_number or "",
-            str(e.total_amount) if e.total_amount is not None else "",
-            str(e.net_amount) if e.net_amount is not None else "",
-            str(e.tax_amount) if e.tax_amount is not None else "",
+            " / ".join(
+                VOUCHER_CATEGORY_ZH.get(c, c)
+                for c in json.loads(e.voucher_categories or "[]")
+            ),
+            _fmt_amount(e.total_amount),
+            _fmt_amount(e.net_amount),
+            _fmt_amount(e.tax_amount),
             e.seller_tax_id or "",
             e.seller_name or "",
             e.item_description or "",
-            e.status.value,
-            e.reject_reason or "",
+            STATUS_ZH.get(e.status.value, e.status.value),
+            remark,
             e.created_at.strftime("%Y-%m-%d %H:%M"),
             e.updated_at.strftime("%Y-%m-%d %H:%M"),
         ])
+
+    # ── 費用科目加總 ──────────────────────────────────────────
+    category_totals: dict[str, Decimal] = {}
+    for e in items:
+        if e.total_amount is None:
+            continue
+        is_void_sum = (
+            e.status == ExpenseStatus.REPLACED_VOID
+            or e.relation_type == "CREDIT_NOTE"
+        )
+        amt = e.total_amount * (Decimal("-1") if is_void_sum else Decimal("1"))
+        cats: list[str] = json.loads(e.expense_categories or "[]")
+        primary = cats[0] if cats else "OTHER"
+        category_totals[primary] = category_totals.get(primary, Decimal("0")) + amt
+
+    if category_totals:
+        writer.writerow([])  # 空白分隔列
+        writer.writerow(["── 費用科目加總 ──"] + [""] * (len(CSV_HEADERS) - 1))
+        total_col = CSV_HEADERS.index("含稅金額")
+        for cat, total in sorted(category_totals.items()):
+            cat_zh = EXPENSE_CATEGORY_ZH.get(cat, cat)
+            row = [""] * len(CSV_HEADERS)
+            row[0] = cat_zh
+            row[total_col] = str(total)
+            writer.writerow(row)
+        grand_total = sum(category_totals.values())
+        grand_row = [""] * len(CSV_HEADERS)
+        grand_row[0] = "合計"
+        grand_row[total_col] = str(grand_total)
+        writer.writerow(grand_row)
 
     csv_content = buf.getvalue()
     return StreamingResponse(
         iter([csv_content]),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": "attachment; filename=expenses.csv"},
+    )
+
+
+# ── GET /expenses/export/tax-report（進項稅額明細表）────────────────────
+# ⚠️ 必須在 /{expense_id} 之前定義
+@router.get("/expenses/export/tax-report")
+def export_tax_report(
+    date_from: date = Query(..., description="費用日期起（YYYY-MM-DD，必填）"),
+    date_to: date = Query(..., description="費用日期迄（YYYY-MM-DD，必填）"),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """進項稅額明細表：以 expense_date 為基準篩選，僅含 APPROVED / COMPLETED，供申報營業稅使用。"""
+    from sqlalchemy import select as sa_select
+    from models.expense import Expense as ExpenseModel, ExpenseStatus as ES
+
+    stmt = (
+        sa_select(ExpenseModel)
+        .where(
+            ExpenseModel.expense_date >= date_from,
+            ExpenseModel.expense_date <= date_to,
+            ExpenseModel.status.in_([
+                ES.APPROVED,
+                ES.COMPLETED,
+                ES.REPLACED_VOID,
+            ]),
+        )
+        .order_by(ExpenseModel.expense_date.asc(), ExpenseModel.serial_number.asc())
+    )
+    items: list[ExpenseModel] = list(db.scalars(stmt).all())
+
+    buf = io.StringIO()
+    buf.write("\ufeff")
+    writer = csv.writer(buf)
+    writer.writerow(TAX_REPORT_HEADERS)
+
+    for e in items:
+        is_void = e.status == ES.REPLACED_VOID
+        sign = Decimal("-1") if is_void else Decimal("1")
+
+        def _tax_fmt(val: Decimal | None, _s: Decimal = sign) -> str:
+            return str(val * _s) if val is not None else ""
+
+        subtypes: list[str] = json.loads(e.voucher_subtypes or "[]")
+        categories: list[str] = json.loads(e.voucher_categories or "[]")
+        exp_cats: list[str] = json.loads(e.expense_categories or "[]")
+
+        v_cat = categories[0] if categories else (e.voucher_categories or "")
+        v_sub = subtypes[0] if subtypes else ""
+        tax_type = _classify_tax_type(v_cat, v_sub)
+
+        remark = "已沖銷" if is_void else ""
+
+        writer.writerow([
+            e.serial_number,
+            str(e.expense_date) if e.expense_date else "",
+            e.invoice_number or "",
+            v_cat,
+            v_sub,
+            tax_type,
+            e.seller_tax_id or "",
+            e.seller_name or "",
+            _tax_fmt(e.net_amount),
+            _tax_fmt(e.tax_amount),
+            _tax_fmt(e.total_amount),
+            exp_cats[0] if exp_cats else "",
+            e.uploader_name or "",
+            e.uploader_dept or "",
+            e.item_description or "",
+            e.user_description or "",
+            e.status.value,
+            remark,
+        ])
+
+    csv_content = buf.getvalue()
+    filename = f"tax-report-{date_from}-{date_to}.csv"
+    return StreamingResponse(
+        iter([csv_content]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

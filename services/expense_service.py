@@ -954,6 +954,7 @@ def reject_expense(
         return None
     expense.status = ExpenseStatus.REPLACED_VOID
     expense.reject_reason = reject_reason
+    expense.display_order = None
     db.commit()
     db.refresh(expense)
     return expense
