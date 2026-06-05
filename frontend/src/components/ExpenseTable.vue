@@ -251,13 +251,6 @@ async function handleUnlinkSupplement(parentExpense, sup) {
 </script>
 
 <template>
-  <!-- Bug 8：client-side 篩選只作用於已載入的頁面資料，提示使用者 -->
-  <div
-    v-if="store.filters.dept || store.filters.category"
-    class="mb-2 rounded-lg bg-yellow-50 border border-yellow-300 px-4 py-2 text-sm text-yellow-800"
-  >
-    ⚠️ 組別 / 費用科目篩選僅套用於已載入的 <strong>{{ store.expenses.length }}</strong> 筆資料，如需完整搜尋請改用上方關鍵字欄位。
-  </div>
   <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
     <div class="overflow-x-auto">
       <table class="w-full text-sm border-collapse">

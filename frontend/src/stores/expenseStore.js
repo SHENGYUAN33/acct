@@ -114,10 +114,7 @@ export const useExpenseStore = defineStore('expense', () => {
       // 勾選狀態篩選（client-side）
       if (filters.value.checkStatus === 'checked' && !checkedIds.value.has(e.id)) return false
       if (filters.value.checkStatus === 'unchecked' && checkedIds.value.has(e.id)) return false
-      // 組別篩選（client-side）
-      if (filters.value.dept && e.uploader_dept !== filters.value.dept) return false
-      // 憑證類別篩選（client-side，比對 mapExpense 轉譯後的中文標籤陣列）
-      if (filters.value.category && !e.voucher_categories?.includes(filters.value.category)) return false
+      // 組別與憑證類別已改為 server-side 查詢，此處不再過濾
       // 費用提報者篩選（client-side fallback）
       if (
         filters.value.submitter &&
@@ -246,6 +243,8 @@ export const useExpenseStore = defineStore('expense', () => {
         ...(filters.value.dateFrom ? { date_from: filters.value.dateFrom } : {}),
         ...(filters.value.dateTo ? { date_to: filters.value.dateTo } : {}),
         ...(filters.value.q ? { q: filters.value.q } : {}),
+        ...(filters.value.dept ? { uploader_dept_q: filters.value.dept } : {}),
+        ...(filters.value.category ? { voucher_category_q: filters.value.category } : {}),
         ...extraParams,
       }
       const res = await apiFetchExpenses(params)

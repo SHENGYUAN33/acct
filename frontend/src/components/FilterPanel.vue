@@ -29,11 +29,11 @@ onMounted(async () => {
 
 const categoryOptions = [
   { value: '', label: '全部類別' },
-  { value: '發票', label: '發票' },
-  { value: '收據', label: '收據' },
-  { value: '勞報', label: '勞報' },
-  { value: '交通', label: '交通' },
-  { value: '退貨折讓', label: '退貨折讓' },
+  { value: 'INVOICE', label: '發票' },
+  { value: 'RECEIPT', label: '收據' },
+  { value: 'LABOR_SERVICE', label: '勞報' },
+  { value: 'TRANSPORTATION', label: '交通' },
+  { value: 'CREDIT_NOTE', label: '退貨折讓' },
 ]
 
 // ── v-model computed setters（雙向綁定 store，保證響應式）────────
@@ -44,16 +44,16 @@ const statusModel = computed({
   set: (v) => store.setFilterAndFetch('status', v),
 })
 
-// 組別：client-side，即時過濾
+// 組別：server-side，onChange 觸發 refetch
 const deptModel = computed({
   get: () => store.filters.dept,
-  set: (v) => store.setFilter('dept', v),
+  set: (v) => store.setFilterAndFetch('dept', v),
 })
 
-// 憑證類別：client-side，即時過濾
+// 憑證類別：server-side，onChange 觸發 refetch
 const categoryModel = computed({
   get: () => store.filters.category,
-  set: (v) => store.setFilter('category', v),
+  set: (v) => store.setFilterAndFetch('category', v),
 })
 
 // ── 日期 / 搜尋：local refs，需明確套用（避免每次 keystroke refetch）
