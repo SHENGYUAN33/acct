@@ -5,10 +5,9 @@ Mock LINE SDK（簽章驗證 + API 呼叫）+ Mock Gemini API。
 使用 SQLite in-memory DB，不依賴真實 PostgreSQL。
 
 測試涵蓋：
-1. 首次 Onboarding（新用戶觸發 reply_with_dept_selection）
-2. 日常批次流程（confirm_submit → reply + background task 加入）
-3. 空批次防護（pending=[] 時送出 → 回覆提示，不建立 Expense）
-4. 貼圖防護（非圖片訊息 → push 提示，pending_images 不變）
+1. 日常批次流程（confirm_submit → reply + background task 加入）
+2. 空批次防護（pending=[] 時送出 → 回覆提示，不建立 Expense）
+3. 貼圖防護（非圖片訊息 → push 提示，pending_images 不變）
 """
 
 # ---------------------------------------------------------------------------
@@ -486,66 +485,6 @@ def _post_webhook(client: TestClient, payload: dict) -> object:
 # ---------------------------------------------------------------------------
 # 測試案例 1：首次 Onboarding
 # ---------------------------------------------------------------------------
-
-class TestOnboardingFlow:
-    """新用戶首次使用，department=None → 觸發部門選單或姓名綁定。"""
-
-    def test_new_user_without_binding_triggers_dept_selection(
-        self, integration_db: Session
-    ) -> None:
-        """
-        enable_user_binding=False 時，新用戶傳文字訊息 →
-        department=None → reply_with_dept_selection 被呼叫一次。
-        """
-        line_user_id = f"U_new_{uuid.uuid4().hex[:8]}"
-        mock_reply_dept = MagicMock()
-
-        with (
-            patch("routers.webhook._parser") as mock_parser,
-            patch("services.line_service.reply_with_dept_selection", mock_reply_dept),
-            patch("services.line_service.reply_text", MagicMock()),
-            patch("services.line_service.push_text", MagicMock()),
-            patch("core.config.settings.enable_user_binding", False),
-            patch("core.config.settings.enable_roster_binding", False),
-        ):
-            payload = _make_text_event(line_user_id, "你好")
-            mock_parser.parse.return_value = _build_parsed_events(payload)
-
-            with _webhook_client(integration_db) as client:
-                response = _post_webhook(client, payload)
-
-        assert response.status_code == 200
-        assert response.json()["status"] == "ok"
-        mock_reply_dept.assert_called_once()
-
-    def test_new_user_with_binding_triggers_name_request(
-        self, integration_db: Session
-    ) -> None:
-        """
-        enable_user_binding=True 且 real_name=None 的新用戶 → reply 要求輸入真實姓名。
-        """
-        line_user_id = f"U_bind_{uuid.uuid4().hex[:8]}"
-        mock_reply_text = MagicMock()
-        mock_reply_dept = MagicMock()
-
-        with (
-            patch("routers.webhook._parser") as mock_parser,
-            patch("services.line_service.reply_text", mock_reply_text),
-            patch("services.line_service.reply_with_dept_selection", mock_reply_dept),
-            patch("services.line_service.push_text", MagicMock()),
-            patch("core.config.settings.enable_user_binding", True),
-        ):
-            payload = _make_text_event(line_user_id, "你好")
-            mock_parser.parse.return_value = _build_parsed_events(payload)
-
-            with _webhook_client(integration_db) as client:
-                response = _post_webhook(client, payload)
-
-        assert response.status_code == 200
-        mock_reply_text.assert_called()
-        all_reply = " ".join(str(c) for c in mock_reply_text.call_args_list)
-        assert "姓名" in all_reply or "綁定" in all_reply
-        mock_reply_dept.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

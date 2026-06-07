@@ -200,7 +200,6 @@ def _client(db_session: Session):
             patch("linebot.v3.WebhookParser.parse") as mock_parse,
             patch("core.database.Base.metadata.create_all", MagicMock()),
             patch("services.line_service.reply_text", MagicMock()),
-            patch("services.line_service.reply_with_dept_selection", MagicMock()),
             patch("services.line_service.download_image", MagicMock(return_value=None)),
             patch("main.start_scheduler", MagicMock()),
         ):
