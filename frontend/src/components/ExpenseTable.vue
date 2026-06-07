@@ -1,7 +1,8 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useExpenseStore } from '../stores/expenseStore'
 import { getExpense, fetchExpenses, fetchRelatedExpenses, resolveDuplicate, updateExpense as apiUpdateExpense } from '../api/expenseApi'
+import { fetchExpenseCategories, fetchVoucherCategories } from '../api/configApi'
 import { toast } from 'vue3-toastify'
 import { API_BASE_URL } from '../utils/axios'
 import { Pencil, Trash2, Plus, ChevronsUpDown, ChevronRight, Link2, GripVertical, Unlink2 } from 'lucide-vue-next'
@@ -12,23 +13,55 @@ const store = useExpenseStore()
 
 const BACKEND_BASE = API_BASE_URL
 
-const CATEGORY_LABEL = {
+// 憑證類別代碼 → 中文（含舊代碼 fallback）
+const LEGACY_VOUCHER_LABEL = {
   INVOICE: '發票', RECEIPT: '收據', LABOR_SERVICE: '勞報',
   TRANSPORTATION: '交通', CREDIT_NOTE: '退貨折讓',
+  INSURANCE: '保險', UTILITY: '水電', RENTAL: '租金',
+  ACCOMMODATION: '住宿', POSTAGE: '郵資',
+  LABOR_FORM: '勞報單', DEPOSIT: '押金', RETURN: '退貨', OTHER: '其他',
 }
+
+// 動態載入的類別資料
+const voucherLabelMap = ref({ ...LEGACY_VOUCHER_LABEL })
+// child label → parent label 對應表（e.g. '高鐵/台鐵/客運/遊覽車' → '勞-交通費'）
+const childToParentLabel = ref({})
+
+onMounted(async () => {
+  try {
+    const [vcRes, catRes] = await Promise.all([
+      fetchVoucherCategories(),
+      fetchExpenseCategories(),
+    ])
+    // 更新憑證類別對應表
+    const vcList = vcRes.data?.data?.voucher_categories ?? []
+    vcList.forEach(v => { voucherLabelMap.value[v.key] = v.label })
+    // 建立子科目 → 父科目 label 的反查表
+    const parents = catRes.data?.data?.parents ?? []
+    const map = {}
+    parents.forEach(p => {
+      p.children.forEach(c => { map[c.label] = p.label })
+    })
+    childToParentLabel.value = map
+  } catch {
+    // fallback：使用預設值
+  }
+})
 
 function normalizeImageUrls(exp) {
   if (!exp) return exp
-  const raw = exp.voucher_categories
-  const parsed = raw
-    ? (typeof raw === 'string' ? JSON.parse(raw) : raw)
+  const rawVoucher = exp.voucher_categories
+  const parsedVoucher = rawVoucher
+    ? (typeof rawVoucher === 'string' ? JSON.parse(rawVoucher) : rawVoucher)
     : null
-  return {
+  return addExpenseCategoryDisplay({
     ...exp,
     image_url: (exp.image_url || []).map(u => u.startsWith('http') ? u : `${BACKEND_BASE}/${u}`),
     item_image_url: (exp.item_image_url || []).map(u => u.startsWith('http') ? u : `${BACKEND_BASE}/${u}`),
-    voucher_categories: parsed ? parsed.map(c => CATEGORY_LABEL[c] ?? c) : null,
-  }
+    voucher_categories: parsedVoucher
+      ? parsedVoucher.map(c => voucherLabelMap.value[c] ?? c)
+      : null,
+  })
 }
 
 // 展開的列 ID 集合（元件本地狀態，與篩選無關）
@@ -183,8 +216,24 @@ const visibleExpenses = computed(() =>
   store.paginatedExpenses.filter(e =>
     !(e.relation_type === 'RETURN_SUPPLEMENT' && e.referenced_invoice_number) &&
     !e.parent_id
-  )
+  ).map(e => addExpenseCategoryDisplay(e))
 )
+
+function addExpenseCategoryDisplay(exp) {
+  const raw = exp.expense_categories
+  const parsed = raw
+    ? (typeof raw === 'string' ? JSON.parse(raw) : raw)
+    : null
+  return {
+    ...exp,
+    expense_categories_display: parsed
+      ? parsed.map(child => {
+          const parent = childToParentLabel.value[child]
+          return parent ? `${parent} > ${child}` : child
+        })
+      : null,
+  }
+}
 
 // ── 拖曳排序 ─────────────────────────────────────────────────────
 const draggedId = ref(null)   // 正在被拖曳的列 ID
@@ -300,14 +349,14 @@ async function handleUnlinkSupplement(parentExpense, sup) {
             </th>
             <!-- 審核狀態 -->
             <th class="px-3 py-2.5 text-left text-gray-600 font-medium whitespace-nowrap">審核狀態</th>
-            <!-- 細項 -->
-            <th class="px-3 py-2.5 text-left text-gray-600 font-medium whitespace-nowrap">
-              <div class="flex items-center gap-1">
-                細項 <ChevronsUpDown :size="12" class="text-gray-400" />
-              </div>
-            </th>
             <!-- 憑證類別 -->
             <th class="px-3 py-2.5 text-left text-gray-600 font-medium whitespace-nowrap">憑證類別</th>
+            <!-- 會計科目 -->
+            <th class="px-3 py-2.5 text-left text-gray-600 font-medium whitespace-nowrap">
+              <div class="flex items-center gap-1">
+                會計科目 <ChevronsUpDown :size="12" class="text-gray-400" />
+              </div>
+            </th>
             <!-- 費用影像 -->
             <th class="px-3 py-2.5 text-left text-gray-600 font-medium whitespace-nowrap">費用影像</th>
             <!-- 物品影像 -->
@@ -483,9 +532,6 @@ async function handleUnlinkSupplement(parentExpense, sup) {
                 </div>
               </td>
 
-              <!-- 細項（空白，後端尚未提供） -->
-              <td class="px-3 py-2 text-gray-400">-</td>
-
               <!-- 憑證類別 -->
               <td class="px-3 py-2 whitespace-nowrap">
                 <template v-if="expense.voucher_categories && expense.voucher_categories.length">
@@ -496,6 +542,18 @@ async function handleUnlinkSupplement(parentExpense, sup) {
                   >
                     {{ cat }}
                   </span>
+                </template>
+                <span v-else class="text-gray-400">-</span>
+              </td>
+
+              <!-- 會計科目 -->
+              <td class="px-3 py-2 whitespace-nowrap">
+                <template v-if="expense.expense_categories_display && expense.expense_categories_display.length">
+                  <span
+                    v-for="cat in expense.expense_categories_display"
+                    :key="cat"
+                    class="inline-block text-xs px-1.5 py-0.5 rounded mr-1 mb-0.5 bg-purple-100 text-purple-700"
+                  >{{ cat }}</span>
                 </template>
                 <span v-else class="text-gray-400">-</span>
               </td>
@@ -780,16 +838,25 @@ async function handleUnlinkSupplement(parentExpense, sup) {
                 </div>
               </td>
 
-              <!-- td11: 細項 -->
-              <td class="px-3 py-1.5 text-gray-400 text-xs">-</td>
-
-              <!-- td12: 憑證類別 -->
+              <!-- td11: 憑證類別 -->
               <td class="px-3 py-1.5 whitespace-nowrap">
                 <template v-if="sup.voucher_categories?.length">
                   <span
                     v-for="cat in sup.voucher_categories"
                     :key="cat"
                     class="inline-block text-xs px-1.5 py-0.5 rounded mr-1 mb-0.5 bg-blue-100 text-blue-700"
+                  >{{ cat }}</span>
+                </template>
+                <span v-else class="text-gray-400 text-xs">-</span>
+              </td>
+
+              <!-- td12: 會計科目 -->
+              <td class="px-3 py-1.5 whitespace-nowrap">
+                <template v-if="sup.expense_categories_display?.length">
+                  <span
+                    v-for="cat in sup.expense_categories_display"
+                    :key="cat"
+                    class="inline-block text-xs px-1.5 py-0.5 rounded mr-1 mb-0.5 bg-purple-100 text-purple-700"
                   >{{ cat }}</span>
                 </template>
                 <span v-else class="text-gray-400 text-xs">-</span>

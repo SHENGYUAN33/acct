@@ -18,13 +18,23 @@ import { API_BASE_URL } from '../utils/axios'
 // 後端 image_url 格式為 "uploads/xxx.jpg"，需拼接 baseURL 才能顯示
 const BACKEND_BASE_URL = API_BASE_URL
 
-// 憑證類別代碼對應中文名稱
+// 憑證類別代碼對應中文名稱（含新 6 種代碼與舊代碼 fallback）
 const CATEGORY_LABEL = {
   INVOICE: '發票',
   RECEIPT: '收據',
+  LABOR_FORM: '勞報單',
+  DEPOSIT: '押金',
+  RETURN: '退貨',
+  OTHER: '其他',
+  // 舊代碼 fallback
   LABOR_SERVICE: '勞報',
   TRANSPORTATION: '交通',
   CREDIT_NOTE: '退貨折讓',
+  INSURANCE: '保險',
+  UTILITY: '水電',
+  RENTAL: '租金',
+  ACCOMMODATION: '住宿',
+  POSTAGE: '郵資',
 }
 
 /**
