@@ -72,9 +72,7 @@ def create_session(
         if _LINE_UID_RE.match(line_user_id):
             line_service.push_text(
                 line_user_id,
-                "⚠️ 您尚未完成身分設定，無法使用報帳功能。\n\n"
-                "請直接在此輸入您的【姓名】完成設定。\n"
-                "（若姓名未登記，請先聯繫管理員）",
+                "請聯繫管理員",
             )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
