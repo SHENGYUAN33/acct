@@ -425,6 +425,7 @@ onMounted(async () => {
           <table class="w-full text-sm whitespace-nowrap">
             <thead>
               <tr class="bg-gray-50 border-b border-gray-200 text-left text-xs text-gray-500 uppercase tracking-wide">
+                <th class="px-3 py-2.5 font-medium w-10 text-center">#</th>
                 <th class="px-4 py-2.5 font-medium">姓名</th>
                 <th class="px-4 py-2.5 font-medium">組別</th>
                 <th class="px-4 py-2.5 font-medium">LINE ID</th>
@@ -440,10 +441,11 @@ onMounted(async () => {
             </thead>
             <tbody>
               <tr
-                v-for="entry in roster"
+                v-for="(entry, idx) in roster"
                 :key="entry.id"
                 class="border-b border-gray-100 hover:bg-gray-50 transition-colors"
               >
+                <td class="px-3 py-3 text-center text-xs text-gray-400 tabular-nums">{{ currentPage * pageSize + idx + 1 }}</td>
                 <td class="px-4 py-3 font-medium text-gray-800">{{ entry.name }}</td>
                 <td class="px-4 py-3 text-gray-600">{{ entry.department || '—' }}</td>
                 <td class="px-4 py-3 text-gray-500 font-mono text-xs">{{ entry.line_id || '—' }}</td>
