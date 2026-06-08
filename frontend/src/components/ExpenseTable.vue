@@ -26,6 +26,8 @@ const LEGACY_VOUCHER_LABEL = {
 const voucherLabelMap = ref({ ...LEGACY_VOUCHER_LABEL })
 // child label → parent label 對應表（e.g. '高鐵/台鐵/客運/遊覽車' → '勞-交通費'）
 const childToParentLabel = ref({})
+// parent key → parent label 對應表（e.g. 'TRANSPORTATION' → '勞-交通費'）
+const parentKeyToLabel = ref({})
 
 onMounted(async () => {
   try {
@@ -36,13 +38,16 @@ onMounted(async () => {
     // 更新憑證類別對應表
     const vcList = vcRes.data?.data?.voucher_categories ?? []
     vcList.forEach(v => { voucherLabelMap.value[v.key] = v.label })
-    // 建立子科目 → 父科目 label 的反查表
+    // 建立子科目 → 父科目 label 的反查表，以及父科目 key → label 查找表
     const parents = catRes.data?.data?.parents ?? []
-    const map = {}
+    const childMap = {}
+    const parentMap = {}
     parents.forEach(p => {
-      p.children.forEach(c => { map[c.label] = p.label })
+      parentMap[p.key] = p.label
+      p.children.forEach(c => { childMap[c.label] = p.label })
     })
-    childToParentLabel.value = map
+    childToParentLabel.value = childMap
+    parentKeyToLabel.value = parentMap
   } catch {
     // fallback：使用預設值
   }
@@ -227,9 +232,12 @@ function addExpenseCategoryDisplay(exp) {
   return {
     ...exp,
     expense_categories_display: parsed
-      ? parsed.map(child => {
-          const parent = childToParentLabel.value[child]
-          return parent ? `${parent} > ${child}` : child
+      ? parsed.map(value => {
+          const parent = childToParentLabel.value[value]
+          if (parent) return `${parent} > ${value}`
+          const parentLabel = parentKeyToLabel.value[value]
+          if (parentLabel) return parentLabel
+          return value
         })
       : null,
   }
@@ -354,7 +362,7 @@ async function handleUnlinkSupplement(parentExpense, sup) {
             <!-- 會計科目 -->
             <th class="px-3 py-2.5 text-left text-gray-600 font-medium whitespace-nowrap">
               <div class="flex items-center gap-1">
-                會計科目 <ChevronsUpDown :size="12" class="text-gray-400" />
+                細項 <ChevronsUpDown :size="12" class="text-gray-400" />
               </div>
             </th>
             <!-- 費用影像 -->

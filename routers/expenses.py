@@ -814,7 +814,7 @@ def update_expense_image_classification(
 ) -> dict:
     """修正 ExpenseImage 的分類欄位（is_voucher / voucher_category / expense_category 等）。"""
     image = expense_service.update_expense_image(
-        db, expense_id, image_id, body.model_dump(exclude_none=True)
+        db, expense_id, image_id, body.model_dump(exclude_unset=True)
     )
     if not image:
         raise HTTPException(status_code=404, detail="Image not found or does not belong to this expense")

@@ -1067,7 +1067,9 @@ def update_expense_image(
         [img.voucher_category for img in all_images if img.is_voucher and img.voucher_category]
     )
     expense.expense_categories = json.dumps(
-        [img.expense_category for img in all_images if img.expense_category]
+        [img.expense_category if img.expense_category else img.expense_parent_category
+         for img in all_images
+         if img.expense_category or img.expense_parent_category]
     )
 
     db.commit()

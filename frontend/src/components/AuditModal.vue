@@ -1041,11 +1041,12 @@ function formatDateTime(val) {
                           </span>
                           <!-- expense parent + child badge -->
                           <span
-                            v-if="img.expense_category"
+                            v-if="img.expense_category || img.expense_parent_category"
                             class="ml-1 inline-block bg-purple-100 text-purple-700 text-xs font-medium px-2 py-0.5 rounded"
                           >
                             <template v-if="img.expense_parent_category && parentCategoryLabel[img.expense_parent_category]">
-                              {{ parentCategoryLabel[img.expense_parent_category] }} &gt;
+                              {{ parentCategoryLabel[img.expense_parent_category] }}
+                              <template v-if="img.expense_category"> &gt; </template>
                             </template>
                             {{ img.expense_category }}
                           </span>
