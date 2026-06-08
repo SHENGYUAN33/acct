@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from core.config import settings
 from core.database import get_db
 from core.security import create_access_token, decode_access_token, hash_password, verify_password
 from models.admin_user import AdminUser
@@ -53,8 +54,20 @@ def login(
             "username": user.username,
             "display_name": user.display_name or user.username,
             "employee_id": user.employee_id or "",
+            "company_tax_id": settings.company_tax_id,
         },
         "message": "登入成功",
+    }
+
+
+# ── GET /auth/project-info（取得專案設定，每次進 Dashboard 刷新用）─
+@router.get("/project-info", response_model=dict)
+def project_info(_: str = Depends(get_current_user)) -> dict:
+    """回傳系統級設定供前端顯示（如統一編號），需 JWT。"""
+    return {
+        "status": "success",
+        "data": {"company_tax_id": settings.company_tax_id},
+        "message": "ok",
     }
 
 

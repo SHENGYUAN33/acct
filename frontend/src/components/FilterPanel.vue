@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { SlidersHorizontal, Search, X } from 'lucide-vue-next'
 import { useExpenseStore } from '../stores/expenseStore'
-import { fetchDepartments } from '../api/configApi'
+import { fetchDepartments, fetchVoucherCategories } from '../api/configApi'
 
 const store = useExpenseStore()
 
@@ -17,24 +17,26 @@ const statusOptions = [
 ]
 
 const deptOptions = ref([])
+const categoryOptions = ref([{ value: '', label: '全部類別' }])
 
 onMounted(async () => {
   try {
-    const res = await fetchDepartments()
-    deptOptions.value = res.data?.data?.departments ?? []
+    const [deptRes, vcRes] = await Promise.all([
+      fetchDepartments(),
+      fetchVoucherCategories(),
+    ])
+    deptOptions.value = deptRes.data?.data?.departments ?? []
+    const loaded = vcRes.data?.data?.voucher_categories ?? []
+    if (loaded.length) {
+      categoryOptions.value = [
+        { value: '', label: '全部類別' },
+        ...loaded.map(c => ({ value: c.key, label: c.label })),
+      ]
+    }
   } catch {
-    // fallback：空陣列
+    // fallback：保持預設「全部類別」
   }
 })
-
-const categoryOptions = [
-  { value: '', label: '全部類別' },
-  { value: 'INVOICE', label: '發票' },
-  { value: 'RECEIPT', label: '收據' },
-  { value: 'LABOR_SERVICE', label: '勞報' },
-  { value: 'TRANSPORTATION', label: '交通' },
-  { value: 'CREDIT_NOTE', label: '退貨折讓' },
-]
 
 // ── v-model computed setters（雙向綁定 store，保證響應式）────────
 

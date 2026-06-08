@@ -15,6 +15,13 @@ export const login = (username, password) => {
 }
 
 /**
+ * GET /api/v1/auth/project-info
+ * 取得系統設定（如統一編號），需 JWT
+ */
+export const getProjectInfo = () =>
+  apiClient.get('/api/v1/auth/project-info')
+
+/**
  * POST /api/v1/auth/register
  * 建立新管理員帳號，回傳 { username, display_name, employee_id }
  */

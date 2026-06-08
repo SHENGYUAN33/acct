@@ -7,10 +7,6 @@ const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 
-const projectInfo = {
-  totalMembers: 24,
-  unifiedNumber: '12345678',
-}
 
 function handleLogout() {
   authStore.logout()
@@ -62,12 +58,12 @@ function handleLogout() {
         <div class="flex items-center gap-1.5 bg-gray-100 rounded px-2.5 py-1">
           <Users :size="13" class="text-gray-500" />
           <span class="text-gray-600">專案總人數：</span>
-          <span class="font-semibold text-gray-800">{{ projectInfo.totalMembers }} 人</span>
+          <span class="font-semibold text-gray-800">{{ authStore.totalMembers }} 人</span>
         </div>
-        <div class="flex items-center gap-1.5 bg-gray-100 rounded px-2.5 py-1">
+        <div v-if="authStore.companyTaxId" class="flex items-center gap-1.5 bg-gray-100 rounded px-2.5 py-1">
           <Hash :size="13" class="text-gray-500" />
           <span class="text-gray-600">統一編號：</span>
-          <span class="font-semibold text-gray-800">{{ projectInfo.unifiedNumber }}</span>
+          <span class="font-semibold text-gray-800">{{ authStore.companyTaxId }}</span>
         </div>
       </div>
 

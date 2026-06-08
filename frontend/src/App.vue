@@ -1,6 +1,13 @@
 <script setup>
+import { onMounted } from 'vue'
 import AppHeader from './components/AppHeader.vue'
 import AuditModal from './components/AuditModal.vue'
+import { useAuthStore } from './stores/authStore'
+
+const authStore = useAuthStore()
+onMounted(() => {
+  authStore.fetchProjectInfo()
+})
 </script>
 
 <template>

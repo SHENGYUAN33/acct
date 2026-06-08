@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     app_debug: bool = False
+    company_tax_id: str = ""
 
     # CORS：production 時填入允許的 origin 清單（逗號分隔或 JSON array）
     cors_origins: list[str] = []
