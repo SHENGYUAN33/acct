@@ -1,6 +1,22 @@
 version: "3.9"
 
 services:
+  backend:
+    build: .
+    container_name: acctassist_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1"
+
   db:
     image: postgres:16-alpine
     container_name: acctassist_db
@@ -21,3 +37,4 @@ services:
 
 volumes:
   postgres_data:
+  uploads_data:

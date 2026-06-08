@@ -4,14 +4,12 @@ import { useExpenseStore } from '../stores/expenseStore'
 import { getExpense, fetchExpenses, fetchRelatedExpenses, resolveDuplicate, updateExpense as apiUpdateExpense } from '../api/expenseApi'
 import { fetchExpenseCategories, fetchVoucherCategories } from '../api/configApi'
 import { toast } from 'vue3-toastify'
-import { API_BASE_URL } from '../utils/axios'
 import { Pencil, Trash2, Plus, ChevronsUpDown, ChevronRight, Link2, GripVertical, Unlink2 } from 'lucide-vue-next'
 import ConfirmModal from './ConfirmModal.vue'
 import BatchGroupModal from './BatchGroupModal.vue'
+import { secureImgUrl } from '../utils/imageUrl'
 
 const store = useExpenseStore()
-
-const BACKEND_BASE = API_BASE_URL
 
 // 憑證類別代碼 → 中文（含舊代碼 fallback）
 const LEGACY_VOUCHER_LABEL = {
@@ -61,8 +59,8 @@ function normalizeImageUrls(exp) {
     : null
   return addExpenseCategoryDisplay({
     ...exp,
-    image_url: (exp.image_url || []).map(u => u.startsWith('http') ? u : `${BACKEND_BASE}/${u}`),
-    item_image_url: (exp.item_image_url || []).map(u => u.startsWith('http') ? u : `${BACKEND_BASE}/${u}`),
+    image_url: (exp.image_url || []).map(secureImgUrl),
+    item_image_url: (exp.item_image_url || []).map(secureImgUrl),
     voucher_categories: parsedVoucher
       ? parsedVoucher.map(c => voucherLabelMap.value[c] ?? c)
       : null,

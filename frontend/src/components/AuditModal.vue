@@ -16,12 +16,9 @@ import {
   RefreshCw,
   ScanLine,
 } from 'lucide-vue-next'
-import { API_BASE_URL } from '../utils/axios'
+import { secureImgUrl } from '../utils/imageUrl'
 
 const store = useExpenseStore()
-
-// 後端 Base URL（供子圖片拼接完整路徑）
-const BACKEND_BASE_URL = API_BASE_URL
 
 // 憑證類別代碼對應中文名稱（動態載入，預設值供 fallback）
 const voucherCategoryOptions = ref([
@@ -111,9 +108,7 @@ async function saveImageClassification(img) {
     // 若 is_voucher 改變，同步更新費用影像 / 物品影像輪播陣列
     const newIsVoucher = payload.is_voucher ?? oldIsVoucher
     if (newIsVoucher !== oldIsVoucher) {
-      const fullUrl = img.image_url.startsWith('http')
-        ? img.image_url
-        : `${BACKEND_BASE_URL}/${img.image_url}`
+      const fullUrl = secureImgUrl(img.image_url)
       if (oldIsVoucher) {
         form.value.image_url = (form.value.image_url || []).filter(u => u !== fullUrl)
         form.value.item_image_url = [...(form.value.item_image_url || []), fullUrl]
@@ -1014,10 +1009,10 @@ function formatDateTime(val) {
                     >
                       <!-- 縮圖 -->
                       <img
-                        :src="BACKEND_BASE_URL + '/' + img.image_url"
+                        :src="secureImgUrl(img.image_url)"
                         :alt="'子圖片 ' + (i + 1)"
                         class="w-16 h-16 object-cover rounded border border-gray-200 cursor-zoom-in shrink-0"
-                        @click="openLightbox(BACKEND_BASE_URL + '/' + img.image_url)"
+                        @click="openLightbox(secureImgUrl(img.image_url))"
                       />
 
                       <!-- View mode -->

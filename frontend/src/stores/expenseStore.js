@@ -13,10 +13,7 @@ import {
   reorderExpenses as apiReorderExpenses,
 } from '../api/expenseApi'
 
-import { API_BASE_URL } from '../utils/axios'
-
-// 後端 image_url 格式為 "uploads/xxx.jpg"，需拼接 baseURL 才能顯示
-const BACKEND_BASE_URL = API_BASE_URL
+import { secureImgUrl } from '../utils/imageUrl'
 
 // 憑證類別代碼對應中文名稱（含新 6 種代碼與舊代碼 fallback）
 const CATEGORY_LABEL = {
@@ -54,8 +51,8 @@ function mapExpense(item, index) {
     // 顯示用流水號（以 created_at 排序後的順序，index 由父層傳入）
     serial: index + 1,
     // 拼接後端靜態檔案 URL（ARRAY → 每個元素加 baseURL，已含 http 則不重複拼接）
-    image_url: (item.image_url || []).map(url => url.startsWith('http') ? url : `${BACKEND_BASE_URL}/${url}`),
-    item_image_url: (item.item_image_url || []).map(url => url.startsWith('http') ? url : `${BACKEND_BASE_URL}/${url}`),
+    image_url: (item.image_url || []).map(secureImgUrl),
+    item_image_url: (item.item_image_url || []).map(secureImgUrl),
     // 後端尚未支援的前端欄位（預設值）
     is_asset: item.is_asset ?? false,
     return_original_data: item.return_original_data ?? '',
@@ -373,17 +370,17 @@ export const useExpenseStore = defineStore('expense', () => {
     const res = await apiUploadImage(id, file, imageType)
     const updated = res.data.data
     const field = imageType === 'expense' ? 'image_url' : 'item_image_url'
-    const newUrls = (updated[field] || []).map(url => url.startsWith('http') ? url : `${BACKEND_BASE_URL}/${url}`)
+    const newUrls = (updated[field] || []).map(secureImgUrl)
     const idx = expenses.value.findIndex((e) => e.id === id)
     if (idx !== -1) expenses.value[idx][field] = newUrls
-    return newUrls  // 回傳帶 baseURL 的陣列
+    return newUrls
   }
 
   async function replaceImage(id, file, imageType, index) {
     const res = await apiReplaceImage(id, file, imageType, index)
     const updated = res.data.data
     const field = imageType === 'expense' ? 'image_url' : 'item_image_url'
-    const newUrls = (updated[field] || []).map(url => url.startsWith('http') ? url : `${BACKEND_BASE_URL}/${url}`)
+    const newUrls = (updated[field] || []).map(secureImgUrl)
     const idx = expenses.value.findIndex((e) => e.id === id)
     if (idx !== -1) expenses.value[idx][field] = newUrls
     return newUrls

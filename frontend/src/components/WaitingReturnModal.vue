@@ -3,11 +3,9 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { X, Loader2, PackageX, CheckCircle2, ChevronRight, ChevronDown, Search, Link2, Unlink2, Trash2, SlidersHorizontal } from 'lucide-vue-next'
 import { fetchWaitingReturns, fetchExpenses, fetchRelatedExpenses, updateExpense, deleteExpense, pairExpense } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
-import { API_BASE_URL } from '../utils/axios'
+import { secureImgUrl as imgUrl } from '../utils/imageUrl'
 
 const emit = defineEmits(['close', 'count-changed'])
-
-const BACKEND_BASE = API_BASE_URL
 
 const VOUCHER_CATEGORY_LABEL = {
   INVOICE: '電子發票', RECEIPT: '收據', TRANSPORTATION: '交通票據',
@@ -83,11 +81,6 @@ const STATUS_DOT = {
   PENDING: 'bg-yellow-400', APPROVED: 'bg-green-500', REJECTED: 'bg-red-500',
   NEEDS_MANUAL_REVIEW: 'bg-orange-400', SUPPLEMENTED: 'bg-blue-400',
   REPLACED_VOID: 'bg-gray-400', WAITING_RETURN: 'bg-purple-500', COMPLETED: 'bg-teal-500',
-}
-
-function imgUrl(url) {
-  if (!url) return ''
-  return url.startsWith('http') ? url : `${BACKEND_BASE}/${url}`
 }
 
 // ── 右欄顯示（進階篩選結果 > 簡易搜尋結果 > 孤立補件）──────────────

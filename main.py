@@ -6,12 +6,11 @@ import os as _os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
-from fastapi.staticfiles import StaticFiles
 
 from core.config import settings
 from core.database import Base, check_db_connection, engine
 from models import admin_user, liff_session, staff_roster, system_setting  # noqa: F401
-from routers import admin, auth, config, expenses, liff, roster, webhook
+from routers import admin, auth, config, expenses, files, liff, roster, webhook
 from core.database import SessionLocal
 from services import line_service
 from services.scheduler import get_scheduled_jobs, start_scheduler, stop_scheduler
@@ -47,10 +46,9 @@ app.include_router(webhook.router)
 app.include_router(expenses.router)
 app.include_router(roster.router)
 app.include_router(liff.router)
+app.include_router(files.router)
 
-# 靜態檔案
 _BASE_DIR = _os.path.dirname(_os.path.abspath(__file__))
-app.mount("/uploads", StaticFiles(directory=_os.path.join(_BASE_DIR, "uploads")), name="uploads")
 
 _liff_index  = _os.path.join(_BASE_DIR, "liff", "index.html")
 _liff_single = _os.path.join(_BASE_DIR, "liff", "single.html")

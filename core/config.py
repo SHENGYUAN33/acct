@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     enable_line_push_reject: bool = True
     # 功能開關：首次使用身分綁定（設為 False 可跳過綁定，維持舊有暱稱邏輯）
     enable_user_binding: bool = True
+    # 功能開關：管理員帳號建立（預設關閉）
+    # 初次部署建立第一個帳號時設為 True，完成後立即改回 False
+    enable_register: bool = False
     # 功能開關：員工名冊預綁定模式
     # 啟用後，首次使用的 LINE 使用者需輸入員工編號完成綁定（由管理員預先匯入名冊）
     # 關閉時，維持原有 Onboarding 流程（手動輸入姓名 + 選擇組別）

@@ -3,14 +3,12 @@ import { ref, computed, onMounted } from 'vue'
 import { X, Loader2, ImageOff } from 'lucide-vue-next'
 import { fetchBatchExpenses } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
-import { API_BASE_URL } from '../utils/axios'
+import { secureImgUrl as imgUrl } from '../utils/imageUrl'
 
 const props = defineProps({
   expenseId: { type: String, required: true },
 })
 const emit = defineEmits(['close'])
-
-const BACKEND_BASE = API_BASE_URL
 
 const isLoading = ref(true)
 const batchExpenses = ref([])
@@ -50,11 +48,6 @@ const CATEGORY_LABEL = {
   RENTAL: '租金',
   ACCOMMODATION: '住宿',
   POSTAGE: '郵資',
-}
-
-function imgUrl(url) {
-  if (!url) return ''
-  return url.startsWith('http') ? url : `${BACKEND_BASE}/${url}`
 }
 
 function categoryLabel(code) {

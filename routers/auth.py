@@ -83,8 +83,12 @@ class RegisterRequest(BaseModel):
 def register(body: RegisterRequest, db: Session = Depends(get_db)) -> dict:
     """
     建立新管理員帳號（含姓名與工號）。
-    ⚠️ 此端點建議在正式環境部署後透過 config 關閉（enable_register=False）。
+    由 ENABLE_REGISTER 環境變數控制開關（預設關閉）。
+    初次部署時設為 true，建立完帳號後立即改回 false。
     """
+    if not settings.enable_register:
+        raise HTTPException(status_code=403, detail="管理員帳號建立功能已關閉，請聯繫系統管理員")
+
     # 帳號重複檢查
     if db.scalar(select(AdminUser).where(AdminUser.username == body.username)):
         raise HTTPException(status_code=409, detail="帳號已存在")
