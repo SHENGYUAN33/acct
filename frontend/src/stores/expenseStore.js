@@ -245,8 +245,8 @@ export const useExpenseStore = defineStore('expense', () => {
         page_size: pageSize.value,
         ...(hasDuplicateFilter.value ? { has_duplicate: true } : {}),
         ...(filters.value.status ? { status: filters.value.status } : {}),
-        // 已作廢單據後端預設排除（is_active=False），需明確帶 include_inactive
-        ...(filters.value.status === 'REPLACED_VOID' ? { include_inactive: true } : {}),
+        // 全部狀態或明確篩選已作廢時，都帶 include_inactive 讓 is_active=False 記錄可見
+        ...(!filters.value.status || filters.value.status === 'REPLACED_VOID' ? { include_inactive: true } : {}),
         ...(filters.value.dateFrom ? { date_from: filters.value.dateFrom } : {}),
         ...(filters.value.dateTo ? { date_to: filters.value.dateTo } : {}),
         ...(filters.value.q ? { q: filters.value.q } : {}),
@@ -442,6 +442,11 @@ export const useExpenseStore = defineStore('expense', () => {
     }
   }
 
+  function patchExpenseInList(id, fields) {
+    const idx = expenses.value.findIndex(e => e.id === id)
+    if (idx !== -1) expenses.value[idx] = { ...expenses.value[idx], ...fields }
+  }
+
   return {
     expenses,
     isLoading,
@@ -480,5 +485,6 @@ export const useExpenseStore = defineStore('expense', () => {
     reOcrExpense,
     reorderExpenses,
     toggleDuplicateFilter,
+    patchExpenseInList,
   }
 })

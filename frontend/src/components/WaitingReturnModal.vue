@@ -337,21 +337,27 @@ function clearRightFilter() {
   rightFilterResults.value = []
 }
 
-// ── 案件層級確認完成：所有補件 → COMPLETED，憑證 → PENDING ──────────
-// 確保無論補件個別狀態為何，都能一鍵將案件移出待退貨管理
+// ── 案件層級確認完成：所有補件 → PENDING，憑證依補件類型決定狀態 ──────
+// VOID_REPLACE：原始憑證 → REPLACED_VOID（作廢，CSV 匯出顯示負數）
+// 其他補件類型：原始憑證 → PENDING（回到待審核）
 async function finalizeCase(item) {
   const invoice = item.invoice
   if (finalizingInvoiceId.value === invoice.id) return
   finalizingInvoiceId.value = invoice.id
   try {
     const ops = []
+    const hasVoidReplace = item.supplements?.some(s => s.relation_type === 'VOID_REPLACE')
     for (const sup of (item.supplements ?? [])) {
       if (!sup.parent_id) ops.push(pairExpense(sup.id, invoice.id))
       if (sup.status !== 'PENDING') ops.push(updateExpense(sup.id, { status: 'PENDING' }))
     }
-    ops.push(updateExpense(invoice.id, { status: 'PENDING' }))
+    if (hasVoidReplace) {
+      ops.push(updateExpense(invoice.id, { status: 'REPLACED_VOID' }))
+    } else {
+      ops.push(updateExpense(invoice.id, { status: 'PENDING' }))
+    }
     await Promise.all(ops)
-    toast.success('案件已完成，憑證移至待審核')
+    toast.success(hasVoidReplace ? '換單完成，原始憑證已作廢' : '案件已完成，憑證移至待審核')
     await loadData()
     emit('count-changed')
   } catch {
@@ -368,12 +374,18 @@ async function deleteOrphanSupplement(sup) {
   if (!confirm(`確定刪除孤立補件 ${sup.serial_number}？此操作無法復原。`)) return
   deletingOrphanId.value = sup.id
   try {
+    // 先解除所有以此補件為 parent 的關聯，否則後端 child_supplements 檢查會阻擋刪除
+    const relatedRes = await fetchRelatedExpenses(sup.id)
+    const children = relatedRes.data?.data ?? []
+    if (children.length) {
+      await Promise.all(children.map(c => updateExpense(c.id, { parent_id: null })))
+    }
     await deleteExpense(sup.id)
     toast.success(`孤立補件 ${sup.serial_number} 已刪除`)
     await loadData()
     emit('count-changed')
-  } catch {
-    toast.error('刪除失敗，請稍後再試')
+  } catch (err) {
+    toast.error(err?.response?.data?.detail || '刪除失敗，請稍後再試')
   } finally {
     deletingOrphanId.value = null
   }
@@ -390,8 +402,8 @@ async function unlinkSupplement(supplement, invoice) {
         referenced_invoice_number: null,
       }),
     ]
-    // finalizeCase 後父憑證狀態為 PENDING，解除時還原為 WAITING_RETURN
-    if (invoice && invoice.status === 'PENDING') {
+    // 解除配對時還原原始憑證為 WAITING_RETURN
+    if (invoice && (invoice.status === 'PENDING' || invoice.status === 'REPLACED_VOID')) {
       ops.push(updateExpense(invoice.id, { status: 'WAITING_RETURN' }))
     }
     await Promise.all(ops)

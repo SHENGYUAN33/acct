@@ -359,6 +359,15 @@ def update_expense(
     for field, value in updates.items():
         if hasattr(expense, field):
             setattr(expense, field, value)
+    # 狀態改為非 REPLACED_VOID 時，若 is_active 未被明確設定，自動還原為 True
+    new_status = updates.get("status")
+    if (
+        new_status is not None
+        and new_status != ExpenseStatus.REPLACED_VOID
+        and "is_active" not in updates
+        and not expense.is_active
+    ):
+        expense.is_active = True
     db.commit()
     db.refresh(expense)
     return expense
@@ -867,7 +876,6 @@ def create_batch_expense(
             is_voucher=ocr_result.is_voucher if ocr_result.success else False,
             voucher_category=ocr_result.voucher_category if ocr_result.success else None,
             voucher_subtype=ocr_result.voucher_subtype if ocr_result.success else None,
-            expense_parent_category=ocr_result.expense_parent_category if ocr_result.success else None,
             expense_category=ocr_result.expense_category if ocr_result.success else None,
             ocr_confidence=ocr_result.overall_confidence if ocr_result.success else None,
             sequence_order=seq,
@@ -1067,9 +1075,7 @@ def update_expense_image(
         [img.voucher_category for img in all_images if img.is_voucher and img.voucher_category]
     )
     expense.expense_categories = json.dumps(
-        [img.expense_category if img.expense_category else img.expense_parent_category
-         for img in all_images
-         if img.expense_category or img.expense_parent_category]
+        [img.expense_category for img in all_images if img.expense_category]
     )
 
     db.commit()

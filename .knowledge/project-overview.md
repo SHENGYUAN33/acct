@@ -296,7 +296,7 @@ AppHeader 右上角顯示 authStore.username
 |------|------|------|
 | `trigger_by` | VARCHAR(32) \| null | 觸發來源：`manual_button`（使用者按鈕）/ `auto_split`（自動切割）/ null（舊資料） |
 | `voucher_subtypes` | TEXT \| null | 憑證子類型去重清單（JSON 陣列字串，如 `["HSR_TICKET","FUEL"]`） |
-| `expense_categories` | TEXT \| null | 費用科目去重清單（JSON 陣列字串，如 `["TRANSPORTATION","MEAL"]`） |
+| `expense_categories` | TEXT \| null | 費用科目去重清單（JSON 陣列字串，儲存中文名稱，如 `["勞-餐飲費","勞-交通費-油資"]`） |
 
 **expense_images 表（Sprint 2 新增，Sprint 3 擴充）：**
 
@@ -308,7 +308,7 @@ AppHeader 右上角顯示 authStore.username
 | `is_voucher` | BOOLEAN | 是否為有效財務憑證（Gemini 判定） |
 | `voucher_category` | VARCHAR(64) \| null | 憑證頂層類別（INVOICE/RECEIPT/LABOR_SERVICE/TRANSPORTATION/CREDIT_NOTE） |
 | `voucher_subtype` | VARCHAR(64) \| null | 憑證子類型（HSR_TICKET/FUEL/EXEMPT_INVOICE 等，Sprint 3 新增） |
-| `expense_category` | VARCHAR(64) \| null | 費用科目（MEAL/STATIONERY/TRANSPORTATION 等，Sprint 3 新增） |
+| `expense_category` | VARCHAR(64) \| null | 費用科目中文名稱（平面清單，如「餐飲費」「油資」，對應 config/expense_categories.json） |
 | `sequence_order` | INTEGER | 圖片順序（從 1 開始） |
 | `ocr_result` | TEXT \| null | OCR 結果（JSON 字串，VoucherOCRResult 序列化） |
 | `ocr_confidence` | NUMERIC(4,3) \| null | Gemini 信心分數 0.000–1.000（Sprint 3 新增） |

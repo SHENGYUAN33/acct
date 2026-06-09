@@ -75,7 +75,7 @@ AcctAssist 使用 PostgreSQL 16 + SQLAlchemy 2.0 ORM。
 | 欄位 | 型別 | 說明 |
 |------|------|------|
 | `voucher_subtypes` | TEXT | 憑證子類型去重清單（JSON 陣列字串，如 `["HSR_TICKET","FUEL"]`） |
-| `expense_categories` | TEXT | 費用科目去重清單（JSON 陣列字串，如 `["TRANSPORTATION","MEAL"]`） |
+| `expense_categories` | TEXT | 費用科目去重清單（JSON 陣列字串，儲存中文名稱，如 `["勞-餐飲費","勞-交通費-油資"]`） |
 
 **Status Enum 定義：**
 
@@ -103,7 +103,7 @@ AcctAssist 使用 PostgreSQL 16 + SQLAlchemy 2.0 ORM。
 | `is_voucher` | BOOLEAN | NOT NULL, default false | 是否為有效財務憑證（Gemini 判定） |
 | `voucher_category` | VARCHAR(64) | nullable | 憑證頂層類別（INVOICE/RECEIPT/LABOR_SERVICE/TRANSPORTATION/CREDIT_NOTE） |
 | `voucher_subtype` | VARCHAR(64) | nullable | 憑證子類型（HSR_TICKET/FUEL/EXEMPT_INVOICE 等，Sprint 3 新增） |
-| `expense_category` | VARCHAR(64) | nullable | 費用科目（MEAL/STATIONERY/TRANSPORTATION 等，Sprint 3 新增） |
+| `expense_category` | VARCHAR(64) | nullable | 費用科目中文名稱（平面清單，如「餐飲費」「油資」，對應 config/expense_categories.json） |
 | `sequence_order` | INTEGER | NOT NULL, default 1 | 圖片上傳順序（從 1 開始） |
 | `ocr_result` | TEXT | nullable | OCR 結果（JSON 字串，VoucherOCRResult 序列化） |
 | `ocr_confidence` | NUMERIC(4,3) | nullable | Gemini overall_confidence 分數（0.000–1.000，Sprint 3 新增） |

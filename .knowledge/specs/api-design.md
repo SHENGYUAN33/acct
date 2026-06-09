@@ -125,7 +125,7 @@ AcctAssist RESTful API，分為五個功能群組：
 | `image_count` | int | 本筆報帳包含的照片數量（預設 1） |
 | `voucher_categories` | list\[str\] \| null | 憑證頂層類別清單，JSON 陣列字串，去重後儲存（如 `["INVOICE","RECEIPT"]`） |
 | `voucher_subtypes` | list\[str\] \| null | 憑證子類型清單，JSON 陣列字串（如 `["HSR_TICKET","FUEL"]`，Sprint 3 新增） |
-| `expense_categories` | list\[str\] \| null | 費用科目清單，JSON 陣列字串（如 `["TRANSPORTATION","MEAL"]`，Sprint 3 新增） |
+| `expense_categories` | list\[str\] \| null | 費用科目清單，JSON 陣列字串，儲存中文名稱（如 `["勞-餐飲費","勞-交通費-油資"]`，Sprint 3 新增） |
 | `trigger_by` | string \| null | 觸發來源（`manual_button` / `auto_split` / null=舊資料，Sprint 3 新增） |
 
 ---
