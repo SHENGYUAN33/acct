@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from core.config import settings
 from core.database import get_db
+from core.response import ok
 from models.system_setting import SystemSetting
 from routers.auth import get_current_user
 from services import line_service
@@ -107,11 +108,7 @@ def setup_rich_menu(_: str = Depends(get_current_user)) -> dict:
     需要有效的 LINE_CHANNEL_ACCESS_TOKEN。
     """
     rich_menu_id = line_service.setup_rich_menu()
-    return {
-        "status": "success",
-        "data": {"rich_menu_id": rich_menu_id},
-        "message": "Rich Menu 設定完成",
-    }
+    return ok(data={"rich_menu_id": rich_menu_id}, message="Rich Menu 設定完成")
 
 
 @router.post("/process-pending", response_model=dict)
@@ -122,11 +119,7 @@ async def process_pending_now(background_tasks: BackgroundTasks) -> dict:
     """
     background_tasks.add_task(run_scheduled_batch)
     logger.info("admin: 手動觸發 pending 批次處理")
-    return {
-        "status": "success",
-        "data": None,
-        "message": "批次處理已開始，請稍後重新整理頁面查看結果",
-    }
+    return ok(data=None, message="批次處理已開始，請稍後重新整理頁面查看結果")
 
 
 @router.get("/scheduler-config", response_model=dict)
@@ -138,11 +131,7 @@ def get_scheduler_config(db: Session = Depends(get_db)) -> dict:
     config = _read_scheduler_config(db)
     config["scheduled_jobs"] = scheduler_service.get_scheduled_jobs()
     config["is_running"] = scheduler_service.is_running()
-    return {
-        "status": "success",
-        "data": config,
-        "message": "排程設定讀取成功",
-    }
+    return ok(data=config, message="排程設定讀取成功")
 
 
 @router.patch("/scheduler-config", response_model=dict)
@@ -180,14 +169,13 @@ def update_scheduler_config(
         registered,
     )
 
-    return {
-        "status": "success",
-        "data": {
+    return ok(
+        data={
             "enabled": payload.enabled,
             "times": payload.times,
             "timezone": payload.timezone,
             "registered_jobs": registered,
             "scheduled_jobs": scheduler_service.get_scheduled_jobs(),
         },
-        "message": f"排程設定已更新，共 {registered} 個觸發時間點",
-    }
+        message=f"排程設定已更新，共 {registered} 個觸發時間點",
+    )

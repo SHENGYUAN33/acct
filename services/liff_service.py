@@ -35,6 +35,7 @@ from schemas.liff import (
 )
 from schemas.ocr import VoucherOCRResult
 from services import expense_service, line_service, ocr_service, relation_service
+from services.storage_service import save_image as _save_image
 from services.auto_split_service import (
     _ImageEntry,
     multi_split_logic_v2,
@@ -118,18 +119,12 @@ def _get_session_or_404(db: Session, session_id: uuid.UUID) -> UploadSession:
     return session
 
 
-def save_uploaded_file(upload_file: UploadFile) -> str:
-    """將 UploadFile 存至 uploads/ 目錄，回傳相對路徑 uploads/{uuid}.jpg。"""
-    ext = Path(upload_file.filename or "image.jpg").suffix or ".jpg"
-    filename = f"{uuid.uuid4()}{ext}"
-    dest = Path(settings.storage_path) / filename
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with dest.open("wb") as f:
-        shutil.copyfileobj(upload_file.file, f)
-    return str(dest)
+async def save_uploaded_file(upload_file: UploadFile) -> str:
+    """將 UploadFile 存至 storage_path，回傳相對路徑 uploads/{uuid}.ext。"""
+    return await _save_image(upload_file)
 
 
-def add_image(
+async def add_image(
     db: Session,
     session_id: uuid.UUID,
     upload_file: UploadFile,
@@ -152,7 +147,7 @@ def add_image(
         )
 
     # 儲存檔案
-    image_path = save_uploaded_file(upload_file)
+    image_path = await save_uploaded_file(upload_file)
 
     # 建立 SessionImage 記錄（is_voucher=None，等待背景任務 OCR 後填入）
     img_record = SessionImage(

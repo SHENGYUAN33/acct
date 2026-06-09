@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from core.config import settings
 from core.database import get_db
+from core.response import ok
 from core.security import create_access_token, decode_access_token, hash_password, verify_password
 from models.admin_user import AdminUser
 
@@ -46,9 +47,8 @@ def login(
 
     token = create_access_token(subject=user.username)
     logger.info("Admin login: username=%s", user.username)
-    return {
-        "status": "success",
-        "data": {
+    return ok(
+        data={
             "access_token": token,
             "token_type": "bearer",
             "username": user.username,
@@ -56,19 +56,15 @@ def login(
             "employee_id": user.employee_id or "",
             "company_tax_id": settings.company_tax_id,
         },
-        "message": "登入成功",
-    }
+        message="登入成功",
+    )
 
 
 # ── GET /auth/project-info（取得專案設定，每次進 Dashboard 刷新用）─
 @router.get("/project-info", response_model=dict)
 def project_info(_: str = Depends(get_current_user)) -> dict:
     """回傳系統級設定供前端顯示（如統一編號），需 JWT。"""
-    return {
-        "status": "success",
-        "data": {"company_tax_id": settings.company_tax_id},
-        "message": "ok",
-    }
+    return ok(data={"company_tax_id": settings.company_tax_id})
 
 
 # ── POST /auth/register（建立管理員帳號）────────────────────────────
@@ -107,12 +103,11 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)) -> dict:
     db.add(admin)
     db.commit()
     logger.info("New admin registered: username=%s employee_id=%s", body.username, body.employee_id)
-    return {
-        "status": "success",
-        "data": {
+    return ok(
+        data={
             "username": body.username,
             "display_name": body.display_name,
             "employee_id": body.employee_id,
         },
-        "message": "管理員帳號建立成功",
-    }
+        message="管理員帳號建立成功",
+    )

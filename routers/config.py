@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter
 
 from core.config import settings
+from core.response import ok
 
 router = APIRouter(
     prefix="/api/v1/config",
@@ -23,40 +24,24 @@ def _load_expense_categories() -> dict:
 @router.get("/departments")
 def get_departments() -> dict:
     """回傳目前系統設定的組別清單（由 .env DEPARTMENTS 控制）。"""
-    return {
-        "status": "success",
-        "data": {"departments": settings.departments},
-        "message": "",
-    }
+    return ok(data={"departments": settings.departments})
 
 
 @router.get("/account-roles")
 def get_account_roles() -> dict:
     """回傳目前系統設定的帳號角色清單（由 .env ACCOUNT_ROLES 控制）。"""
-    return {
-        "status": "success",
-        "data": {"account_roles": settings.account_roles},
-        "message": "",
-    }
+    return ok(data={"account_roles": settings.account_roles})
 
 
 @router.get("/expense-categories")
 def get_expense_categories() -> dict:
     """回傳費用父子科目完整清單（由 config/expense_categories.json 控制）。"""
     data = _load_expense_categories()
-    return {
-        "status": "success",
-        "data": {"parents": data["parents"]},
-        "message": "",
-    }
+    return ok(data={"parents": data["parents"]})
 
 
 @router.get("/voucher-categories")
 def get_voucher_categories() -> dict:
     """回傳憑證類別清單（由 config/expense_categories.json 控制）。"""
     data = _load_expense_categories()
-    return {
-        "status": "success",
-        "data": {"voucher_categories": data["voucher_categories"]},
-        "message": "",
-    }
+    return ok(data={"voucher_categories": data["voucher_categories"]})

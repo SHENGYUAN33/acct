@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from core.database import get_db
+from core.response import ok
 from routers.auth import get_current_user
 from schemas.roster import RosterCreate, RosterImportResult, RosterListResponse, RosterRead, RosterUpdate
 from models.user import User
@@ -39,17 +40,15 @@ def list_roster(
     """查詢員工名冊清單，支援 is_bound 過濾與分頁。"""
     items, total = roster_service.get_all_roster(db, is_bound=is_bound, page=page, size=size)
     total_pages = math.ceil(total / size) if size > 0 else 0
-    return {
-        "status": "success",
-        "data": RosterListResponse(
+    return ok(
+        data=RosterListResponse(
             content=[RosterRead.model_validate(item) for item in items],
             page=page,
             size=size,
             total_elements=total,
             total_pages=total_pages,
         ).model_dump(),
-        "message": "ok",
-    }
+    )
 
 
 # ── POST /roster（新增單筆）─────────────────────────────────────────
@@ -70,11 +69,7 @@ def create_roster(
         is_petty_cash_target=body.is_petty_cash_target,
         bank_account=body.bank_account,
     )
-    return {
-        "status": "success",
-        "data": RosterRead.model_validate(entry).model_dump(),
-        "message": "新增成功",
-    }
+    return ok(data=RosterRead.model_validate(entry).model_dump(), message="新增成功")
 
 
 # ── GET /roster/export（匯出現有名冊 CSV）── 必須在 /{roster_id} 前定義 ──
@@ -140,11 +135,10 @@ async def import_roster_csv(
     csv_content = raw_bytes.decode("utf-8-sig")
 
     result = roster_service.import_from_csv(db, csv_content)
-    return {
-        "status": "success",
-        "data": RosterImportResult(**result).model_dump(),
-        "message": f"匯入完成：新增 {result['created']} 筆，更新 {result['updated']} 筆，錯誤 {len(result['errors'])} 筆",
-    }
+    return ok(
+        data=RosterImportResult(**result).model_dump(),
+        message=f"匯入完成：新增 {result['created']} 筆，更新 {result['updated']} 筆，錯誤 {len(result['errors'])} 筆",
+    )
 
 
 # ── PATCH /roster/{roster_id}（修改）───────────────────────────────
@@ -168,11 +162,7 @@ def update_roster(
     if entry is None:
         raise HTTPException(status_code=404, detail="找不到指定的員工名冊記錄")
 
-    return {
-        "status": "success",
-        "data": RosterRead.model_validate(entry).model_dump(),
-        "message": "更新成功",
-    }
+    return ok(data=RosterRead.model_validate(entry).model_dump(), message="更新成功")
 
 
 # ── DELETE /roster/{roster_id}（刪除）──────────────────────────────
@@ -189,11 +179,7 @@ def delete_roster(
             raise HTTPException(status_code=404, detail="找不到指定的員工名冊記錄")
         raise HTTPException(status_code=400, detail="該員工已完成 LINE 綁定，無法刪除。如需刪除請先解除綁定。")
 
-    return {
-        "status": "success",
-        "data": None,
-        "message": "刪除成功",
-    }
+    return ok(data=None, message="刪除成功")
 
 
 # ── POST /roster/{roster_id}/unbind（解除綁定）─────────────────────
@@ -221,8 +207,4 @@ def unbind_roster(
             db.commit()
             logger.info("unbind_roster: cleared real_name/department for line_user_id=%s", bound_line_user_id)
 
-    return {
-        "status": "success",
-        "data": RosterRead.model_validate(entry).model_dump(),
-        "message": "已解除 LINE 綁定",
-    }
+    return ok(data=RosterRead.model_validate(entry).model_dump(), message="已解除 LINE 綁定")

@@ -16,7 +16,15 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from core.config import settings
+from core.constants import (
+    CSV_HEADERS,
+    EXPENSE_CATEGORY_ZH,
+    STATUS_ZH,
+    TAX_REPORT_HEADERS,
+    VOUCHER_CATEGORY_ZH,
+)
 from core.database import get_db
+from core.response import ok
 from routers.auth import get_current_user
 from models.expense import Expense, ExpenseStatus
 from models.user import User
@@ -25,6 +33,7 @@ from schemas.expense_image import ExpenseImageRead, ExpenseImageUpdate, MoveImag
 from schemas.ocr import VoucherOCRResult
 from services import expense_service, line_service
 from services.ocr_service import classify_and_extract_with_retry
+from services.storage_service import save_image
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
@@ -35,68 +44,6 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
-UPLOADS_DIR = Path("uploads")
-UPLOADS_DIR.mkdir(exist_ok=True)
-
-# CSV 匯出欄位定義
-CSV_HEADERS = [
-    "案件編號", "ID", "上傳者", "上傳者組別", "費用提報者", "費用提報者組別",
-    "上傳日期", "費用日期", "發票號碼", "憑證類別", "含稅金額", "未稅金額", "營業稅額",
-    "賣方統編", "賣方公司", "項目說明", "憑證狀態", "退件原因",
-    "建立時間", "更新時間",
-]
-
-# 憑證類別中文對照
-VOUCHER_CATEGORY_ZH: dict[str, str] = {
-    "INVOICE": "發票",
-    "RECEIPT": "收據",
-    "TRANSPORTATION": "交通票據",
-    "ACCOMMODATION": "住宿",
-    "LABOR_SERVICE": "勞務費",
-    "UTILITY": "水電費",
-    "RENTAL": "租金",
-    "INSURANCE": "保險",
-    "POSTAGE": "郵資",
-    "CREDIT_NOTE": "折讓單",
-    "OTHER": "其他",
-}
-
-# 憑證狀態中文對照
-STATUS_ZH: dict[str, str] = {
-    "PENDING": "待審核",
-    "APPROVED": "已核准",
-    "REJECTED": "已退件",
-    "NEEDS_MANUAL_REVIEW": "需人工審核",
-    "SUPPLEMENTED": "已補件",
-    "WAITING_RETURN": "待退貨",
-    "COMPLETED": "已結清",
-    "REPLACED_VOID": "已作廢（沖銷）",
-}
-
-# 費用科目中文對照
-EXPENSE_CATEGORY_ZH: dict[str, str] = {
-    "MEAL": "餐費",
-    "TRANSPORTATION": "交通費",
-    "STATIONERY": "文具費",
-    "ACCOMMODATION": "住宿費",
-    "INSURANCE": "保險費",
-    "UTILITY": "水電費",
-    "RENTAL": "租金",
-    "LABOR_SERVICE": "勞務費",
-    "POSTAGE": "郵資",
-    "ENTERTAINMENT": "交際費",
-    "TRAINING": "訓練費",
-    "MEDICAL": "醫療費",
-    "OTHER": "其他",
-}
-
-# 進項稅額明細表欄位定義
-TAX_REPORT_HEADERS = [
-    "案件編號", "費用日期", "發票號碼", "憑證類型", "憑證子類型", "稅務類別",
-    "賣方統編", "賣方名稱", "稅前金額", "營業稅額", "含稅金額",
-    "費用科目", "上傳者", "上傳者組別", "項目說明", "使用者備註",
-    "憑證狀態", "備注",
-]
 
 
 def _classify_tax_type(voucher_category: str | None, voucher_subtype: str | None) -> str:
@@ -164,16 +111,14 @@ def list_expenses(
         amount_max=amount_max,
         voucher_category_q=voucher_category_q,
     )
-    return {
-        "status": "success",
-        "data": ExpenseListResponse(
+    return ok(
+        data=ExpenseListResponse(
             total=total,
             page=page,
             page_size=page_size,
             items=[ExpenseRead.model_validate(i) for i in items],
         ).model_dump(),
-        "message": "ok",
-    }
+    )
 
 
 # ── GET /expenses/export（CSV 匯出）────────────────────────────────
@@ -358,11 +303,7 @@ def export_tax_report(
 def create_expense(body: ExpenseCreate, db: Session = Depends(get_db)) -> dict:
     """Dashboard 手動新增費用（不透過 LINE）。"""
     expense = expense_service.create_expense_manual(db, **body.model_dump(exclude_none=True))
-    return {
-        "status": "success",
-        "data": ExpenseRead.model_validate(expense).model_dump(),
-        "message": "Expense created",
-    }
+    return ok(data=ExpenseRead.model_validate(expense).model_dump(), message="Expense created")
 
 
 # ── GET /expenses/waiting-returns（待退貨管理清單）────────────────
@@ -505,15 +446,13 @@ def list_waiting_returns(
 
     wr_count = sum(1 for inv in invoice_by_id.values() if inv.status == ExpenseStatus.WAITING_RETURN)
 
-    return {
-        "status": "success",
-        "data": {
+    return ok(
+        data={
             "cases": cases,
             "orphan_supplements": orphan_supplements,
             "total": wr_count,
         },
-        "message": "ok",
-    }
+    )
 
 
 # ── POST /expenses/{id}/pair（配對退貨補件與原始費用）──────────────
@@ -533,11 +472,7 @@ def pair_expense(
         expense = expense_service.pair_expenses(db, expense_id, body.original_expense_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    return {
-        "status": "success",
-        "data": ExpenseRead.model_validate(expense).model_dump(),
-        "message": "配對成功",
-    }
+    return ok(data=ExpenseRead.model_validate(expense).model_dump(), message="配對成功")
 
 
 # ── GET /expenses/{id}/related（查詢關聯報帳）────────────────────
@@ -548,11 +483,7 @@ def get_related_expenses(expense_id: uuid.UUID, db: Session = Depends(get_db)) -
     children = list(db.scalars(
         select(Expense).where(Expense.parent_id == expense_id)
     ).all())
-    return {
-        "status": "success",
-        "data": [ExpenseRead.model_validate(c).model_dump() for c in children],
-        "message": "ok",
-    }
+    return ok(data=[ExpenseRead.model_validate(c).model_dump() for c in children])
 
 
 # ── GET /expenses/{id}/batch（批次組查詢）────────────────────────
@@ -563,11 +494,7 @@ def get_expense_batch(
 ) -> dict:
     """回傳與指定 expense 同一批次（相同 group_id）的所有 Expense，含 images 子清單。"""
     expenses = expense_service.get_batch_expenses(db, expense_id)
-    return {
-        "status": "success",
-        "data": {"expenses": [ExpenseWithImages.model_validate(e).model_dump() for e in expenses]},
-        "message": "ok",
-    }
+    return ok(data={"expenses": [ExpenseWithImages.model_validate(e).model_dump() for e in expenses]})
 
 
 # ── GET /expenses/{id}（單筆查詢）─────────────────────────────────
@@ -576,11 +503,7 @@ def get_expense(expense_id: uuid.UUID, db: Session = Depends(get_db)) -> dict:
     expense = expense_service.get_expense(db, expense_id)
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
-    return {
-        "status": "success",
-        "data": ExpenseRead.model_validate(expense).model_dump(),
-        "message": "ok",
-    }
+    return ok(data=ExpenseRead.model_validate(expense).model_dump())
 
 
 # ── PATCH /expenses/reorder（拖曳排序持久化）─────────────────────
@@ -600,7 +523,7 @@ def reorder_expenses(
     前端完整傳入排列後的所有 ID，後端依序 0, 1, 2... 儲存。
     """
     expense_service.reorder_expenses(db, body.ordered_ids)
-    return {"status": "success", "data": None, "message": "排序已儲存"}
+    return ok(data=None, message="排序已儲存")
 
 
 # ── PATCH /expenses/{id}（部分更新欄位）───────────────────────────
@@ -615,11 +538,7 @@ def update_expense(
     expense = expense_service.update_expense(db, expense_id, updates)
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
-    return {
-        "status": "success",
-        "data": ExpenseRead.model_validate(expense).model_dump(),
-        "message": "Expense updated",
-    }
+    return ok(data=ExpenseRead.model_validate(expense).model_dump(), message="Expense updated")
 
 
 # ── DELETE /expenses/{id}（刪除）──────────────────────────────────
@@ -665,13 +584,13 @@ def resolve_duplicate(
     if body.action == "dismiss":
         expense.possible_duplicate_of = None
         db.commit()
-        return {"status": "success", "data": None, "message": "已確認為合法單據，警示已清除"}
+        return ok(data=None, message="已確認為合法單據，警示已清除")
 
     # action == "delete"
     deleted = expense_service.delete_expense(db, expense_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Expense not found")
-    return {"status": "success", "data": None, "message": "重複費用單已刪除"}
+    return ok(data=None, message="重複費用單已刪除")
 
 
 # ── PATCH /expenses/{id}/reject（退回單據 + LINE 推播）──────────
@@ -705,7 +624,7 @@ def reject_expense(
                 voucher_categories=expense.voucher_categories,
             )
 
-    return {"status": "success", "data": None, "message": "單據已退回"}
+    return ok(data=None, message="單據已退回")
 
 
 # ── POST /expenses/{id}/images（追加補件圖片）────────────────────
@@ -725,35 +644,11 @@ async def upload_expense_image(
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
 
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="只允許上傳圖片檔案")
-
-    ext = Path(file.filename or "image.jpg").suffix or ".jpg"
-    filename = f"{uuid.uuid4()}{ext}"
-    dest = UPLOADS_DIR / filename
-
-    try:
-        content = await file.read()
-        if len(content) > settings.max_upload_bytes:
-            raise HTTPException(
-                status_code=400,
-                detail=f"檔案超過大小限制（上限 {settings.max_upload_bytes // (1024 * 1024)} MB）",
-            )
-        dest.write_bytes(content)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"圖片儲存失敗：{e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="圖片儲存失敗，請稍後再試")
-
+    relative_path = await save_image(file)
     updated = expense_service.append_expense_image(
-        db, expense_id, f"uploads/{filename}", image_type
+        db, expense_id, relative_path, image_type
     )
-    return {
-        "status": "success",
-        "data": ExpenseRead.model_validate(updated).model_dump(),
-        "message": f"{image_type} image appended",
-    }
+    return ok(data=ExpenseRead.model_validate(updated).model_dump(), message=f"{image_type} image appended")
 
 
 # ── POST /expenses/{id}/images/replace（替換指定索引圖片）──────────
@@ -770,38 +665,14 @@ async def replace_expense_image(
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
 
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="只允許上傳圖片檔案")
-
-    ext = Path(file.filename or "image.jpg").suffix or ".jpg"
-    filename = f"{uuid.uuid4()}{ext}"
-    dest = UPLOADS_DIR / filename
-
-    try:
-        content = await file.read()
-        if len(content) > settings.max_upload_bytes:
-            raise HTTPException(
-                status_code=400,
-                detail=f"檔案超過大小限制（上限 {settings.max_upload_bytes // (1024 * 1024)} MB）",
-            )
-        dest.write_bytes(content)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"圖片儲存失敗：{e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="圖片儲存失敗，請稍後再試")
-
+    relative_path = await save_image(file)
     updated = expense_service.replace_expense_image(
-        db, expense_id, f"uploads/{filename}", image_type, index
+        db, expense_id, relative_path, image_type, index
     )
     if not updated:
         raise HTTPException(status_code=400, detail="索引越界或費用不存在")
 
-    return {
-        "status": "success",
-        "data": ExpenseRead.model_validate(updated).model_dump(),
-        "message": f"{image_type} image replaced at index {index}",
-    }
+    return ok(data=ExpenseRead.model_validate(updated).model_dump(), message=f"{image_type} image replaced at index {index}")
 
 
 # ── PATCH /expenses/{id}/images/{image_id}（修正圖片分類）────────
@@ -818,11 +689,7 @@ def update_expense_image_classification(
     )
     if not image:
         raise HTTPException(status_code=404, detail="Image not found or does not belong to this expense")
-    return {
-        "status": "success",
-        "data": ExpenseImageRead.model_validate(image).model_dump(),
-        "message": "分類已更新",
-    }
+    return ok(data=ExpenseImageRead.model_validate(image).model_dump(), message="分類已更新")
 
 
 # ── POST /expenses/{id}/images/{image_id}/move（跨交易搬移圖片）──
@@ -839,11 +706,7 @@ def move_expense_image(
     image = expense_service.move_expense_image(db, expense_id, image_id, body.target_expense_id)
     if not image:
         raise HTTPException(status_code=404, detail="Image not found or expense not found")
-    return {
-        "status": "success",
-        "data": ExpenseImageRead.model_validate(image).model_dump(),
-        "message": "圖片已搬移",
-    }
+    return ok(data=ExpenseImageRead.model_validate(image).model_dump(), message="圖片已搬移")
 
 
 # ── GET /expenses/{id}/images（查詢圖片清單）─────────────────────
@@ -858,14 +721,13 @@ def get_expense_images(
         raise HTTPException(status_code=404, detail="Expense not found")
 
     images = expense_service.get_expense_images(db, expense_id)
-    return {
-        "status": "success",
-        "data": {
+    return ok(
+        data={
             "expense_id": str(expense_id),
             "images": [ExpenseImageRead.model_validate(img).model_dump() for img in images],
         },
-        "message": "成功",
-    }
+        message="成功",
+    )
 
 
 # ── POST /expenses/{id}/reocr（重新辨識）─────────────────────────
@@ -917,8 +779,4 @@ async def reocr_expense(
 
     updated_expense = expense_service.update_expense(db, expense_id, updates)
 
-    return {
-        "status": "success",
-        "data": ExpenseRead.model_validate(updated_expense).model_dump(),
-        "message": "重新辨識完成",
-    }
+    return ok(data=ExpenseRead.model_validate(updated_expense).model_dump(), message="重新辨識完成")
