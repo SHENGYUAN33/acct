@@ -9,6 +9,7 @@ from google.genai import types
 from PIL import Image
 
 from core.config import settings
+from core.expense_categories import build_ocr_prompt_list
 from schemas.ocr import VoucherOCRResult
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ _OCR_SEMAPHORE = asyncio.Semaphore(settings.ocr_max_concurrent)
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
 
-MULTI_TASK_PROMPT = """你是一個具備台灣會計知識的財務審計助理。請分析這張圖片，依序執行以下三個步驟，最後嚴格依照 JSON Schema 回傳結果。
+_PROMPT_TEMPLATE = """你是一個具備台灣會計知識的財務審計助理。請分析這張圖片，依序執行以下三個步驟，最後嚴格依照 JSON Schema 回傳結果。
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【步驟一：場景推理（scene_reasoning）】
@@ -56,23 +57,9 @@ MULTI_TASK_PROMPT = """你是一個具備台灣會計知識的財務審計助理
   其餘類型 voucher_subtype 填 null
 
 ━━ 步驟 1B：費用科目（expense_category）━━
-從以下清單選一，填入**完整中文名稱（含「勞-」前綴）**：
+從以下清單選一，填入**完整中文名稱**：
 
-  勞-勞務費 /
-  勞-餐飲費 / 勞-誤餐費 / 勞-飲用水 /
-  勞-場地租金 / 勞-辦公室租金 / 勞-辦公室用品租金 / 勞-車輛租金 /
-  勞-住宿費 / 勞-水電瓦斯費 / 勞-電信/網路費 /
-  勞-文具用品 / 勞-郵電費 /
-  勞-交通費-高鐵、台鐵、客運、遊覽車 / 勞-交通費-計程車資 / 勞-交通費-過路費 /
-  勞-交通費-罰單 / 勞-交通費-停車費 / 勞-交通費-油資 /
-  勞-保險費 / 勞-現場拍攝用品購買 / 勞-雜費 /
-  勞-劇本費 / 勞-交際費 / 勞-演出費 / 勞-臨演演出費 /
-  勞-置景材料耗材費 / 勞-陳設材料耗材費 / 勞-美術道具費 / 勞-美術道具租金 /
-  勞-造型化妝費 / 勞-特殊化妝費 / 勞-服裝費 / 勞-服裝租金 /
-  勞-場務器材費 / 勞-場務遺失及損壞 / 勞-燈光費 / 勞-燈光遺失及損壞 /
-  勞-攝影費 / 勞-攝影遺失及損壞 / 勞-收音器材費 / 勞-收音遺失及損壞 /
-  勞-航拍器材費 / 勞-航拍遺失及損壞 /
-  勞-剪接製作費 / 勞-檔管物品購置 / 勞-特效素材費 / 勞-職工福利
+  {CATEGORY_LIST}
 
   **重要：若無法判斷，expense_category 填「勞-現場拍攝用品購買」**
 
@@ -216,6 +203,11 @@ overall_confidence = 所有已填欄位信心分數的加權平均（以 total_a
 """
 
 
+def _build_prompt() -> str:
+    """在 runtime 將 {CATEGORY_LIST} 替換為最新科目清單（由 expense_categories 單一來源產生）。"""
+    return _PROMPT_TEMPLATE.replace("{CATEGORY_LIST}", build_ocr_prompt_list())
+
+
 def _extract_image_path(image_path: str | Path | dict | list) -> str | Path:
     """
     智慧路徑提取：防禦 Sprint 3 新格式（含 metadata 的 dict/list）。
@@ -255,7 +247,7 @@ async def classify_and_extract(image_path: str | Path | dict | list) -> VoucherO
         img = Image.open(resolved_path)
         response = await _client.aio.models.generate_content(
             model=settings.gemini_model,
-            contents=[MULTI_TASK_PROMPT, img],
+            contents=[_build_prompt(), img],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=VoucherOCRResult,

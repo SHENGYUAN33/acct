@@ -1,9 +1,11 @@
+import json
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
+from core.expense_categories import key_to_label
 from models.expense import ExpenseStatus
 from schemas.expense_image import ExpenseImageRead
 
@@ -40,9 +42,10 @@ class ExpenseRead(BaseModel):
     voucher_categories: str | None = None   # JSON 陣列字串，如 '["INVOICE","RECEIPT"]'
     # Sprint 3 — 觸發來源（manual_button / auto_split / null 表示舊資料）
     trigger_by: str | None = None
-    # GenAI OCR 擴充 — 子類型與費用科目彙總（新增欄位）
+    # GenAI OCR 擴充 — 子類型與費用科目彙總
     voucher_subtypes: str | None = None     # JSON 陣列字串，如 '["HSR_TICKET","PARKING"]'
-    expense_categories: str | None = None   # JSON 陣列字串，如 '["TRANSPORTATION","MEAL"]'
+    # DB 存 key 陣列，回傳前自動翻成 label 陣列（由 model_validator 處理）
+    expense_categories: str | None = None
 
     # Workflow
     status: ExpenseStatus
@@ -57,10 +60,20 @@ class ExpenseRead(BaseModel):
     is_active: bool = True
     void_reason: str | None = None
     referenced_invoice_number: str | None = None
-    # 重複憑證偵測（指向同 user 相同 invoice_number 的先前單）
     possible_duplicate_of: uuid.UUID | None = None
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def translate_expense_categories(self) -> "ExpenseRead":
+        if self.expense_categories:
+            try:
+                keys: list[str] = json.loads(self.expense_categories)
+                labels = [key_to_label(k) or k for k in keys]
+                self.expense_categories = json.dumps(labels, ensure_ascii=False)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return self
 
 
 class ExpenseStatusUpdate(BaseModel):

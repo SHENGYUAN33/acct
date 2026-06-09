@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from core.config import settings
+from core.expense_categories import normalize_to_key
 from models.expense import Expense, ExpenseStatus
 from models.expense_image import ExpenseImage
 from models.user import User
@@ -771,8 +772,9 @@ def create_batch_expense(
                 seen_categories.append(result.voucher_category)
             if result.voucher_subtype and result.voucher_subtype not in seen_subtypes:
                 seen_subtypes.append(result.voucher_subtype)
-            if result.expense_category and result.expense_category not in seen_expense_cats:
-                seen_expense_cats.append(result.expense_category)
+            cat_key = normalize_to_key(result.expense_category)
+            if cat_key and cat_key not in seen_expense_cats:
+                seen_expense_cats.append(cat_key)
 
     voucher_categories_json: str | None = (
         json.dumps(seen_categories, ensure_ascii=False) if seen_categories else None
@@ -876,7 +878,7 @@ def create_batch_expense(
             is_voucher=ocr_result.is_voucher if ocr_result.success else False,
             voucher_category=ocr_result.voucher_category if ocr_result.success else None,
             voucher_subtype=ocr_result.voucher_subtype if ocr_result.success else None,
-            expense_category=ocr_result.expense_category if ocr_result.success else None,
+            expense_category=normalize_to_key(ocr_result.expense_category) if ocr_result.success else None,
             ocr_confidence=ocr_result.overall_confidence if ocr_result.success else None,
             sequence_order=seq,
             ocr_result=ocr_json,
@@ -1044,6 +1046,9 @@ def update_expense_image(
 
     old_is_voucher = image.is_voucher
     new_is_voucher = updates.get("is_voucher", old_is_voucher)
+
+    if "expense_category" in updates and updates["expense_category"] is not None:
+        updates["expense_category"] = normalize_to_key(updates["expense_category"])
 
     for field, value in updates.items():
         setattr(image, field, value)

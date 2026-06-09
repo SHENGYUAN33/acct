@@ -3,7 +3,9 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
+
+from core.expense_categories import key_to_label
 
 
 class ExpenseImageRead(BaseModel):
@@ -12,24 +14,27 @@ class ExpenseImageRead(BaseModel):
     image_url: str
     is_voucher: bool
     voucher_category: str | None
-    # 子類型：HSR_TICKET / FUEL / EXEMPT_INVOICE 等
     voucher_subtype: str | None = None
-    # 費用科目中文名稱（對應 config/expense_categories.json categories[].label）
+    # DB 存 key（如 TRANS_TAXI），回傳前自動翻成 label（如 勞-交通費-計程車資）
     expense_category: str | None = None
     sequence_order: int
-    # JSON 字串，對應完整 VoucherOCRResult（含推理說明與信心分數）
     ocr_result: str | None
-    # Gemini overall_confidence 分數 0.000–1.000（新增欄位）
     ocr_confidence: float | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def translate_expense_category(self) -> "ExpenseImageRead":
+        self.expense_category = key_to_label(self.expense_category)
+        return self
 
 
 class ExpenseImageUpdate(BaseModel):
     is_voucher: bool | None = None
     voucher_category: str | None = None
     voucher_subtype: str | None = None
+    # 接受 label 或 key，service 層統一 normalize 成 key 再存入 DB
     expense_category: str | None = None
 
 

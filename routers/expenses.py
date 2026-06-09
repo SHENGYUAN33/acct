@@ -170,11 +170,11 @@ def export_expenses(
                 VOUCHER_CATEGORY_ZH.get(c, c)
                 for c in json.loads(e.voucher_categories or "[]")
             ),
-            " / ".join(expense_cats),
+            " / ".join(EXPENSE_CATEGORY_ZH.get(c, c) for c in expense_cats),
             _fmt_amount(e.total_amount),
             _fmt_amount(e.net_amount),
             _fmt_amount(e.tax_amount),
-            e.seller_tax_id or "",
+            f"\t{e.seller_tax_id}" if e.seller_tax_id else "",
             e.seller_name or "",
             e.item_description or "",
             STATUS_ZH.get(e.status.value, e.status.value),
