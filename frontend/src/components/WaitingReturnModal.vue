@@ -530,10 +530,10 @@ async function unlinkSupplement(supplement, invoice) {
               </div>
               <div class="flex items-center gap-1">
                 <input type="number" v-model="leftFilter.amount_min" placeholder="最低金額"
-                  class="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+                  class="flex-1 min-w-0 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
                 <span class="text-gray-400 text-xs shrink-0">～</span>
                 <input type="number" v-model="leftFilter.amount_max" placeholder="最高金額"
-                  class="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+                  class="flex-1 min-w-0 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
                 <span class="text-gray-400 text-[10px] shrink-0">NT$</span>
               </div>
               <select v-model="leftFilter.voucher_category"
@@ -856,10 +856,10 @@ async function unlinkSupplement(supplement, invoice) {
               </div>
               <div class="flex items-center gap-1">
                 <input type="number" v-model="rightFilter.amount_min" placeholder="最低金額"
-                  class="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+                  class="flex-1 min-w-0 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
                 <span class="text-gray-400 text-xs shrink-0">～</span>
                 <input type="number" v-model="rightFilter.amount_max" placeholder="最高金額"
-                  class="flex-1 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
+                  class="flex-1 min-w-0 text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
                 <span class="text-gray-400 text-[10px] shrink-0">NT$</span>
               </div>
               <select v-model="rightFilter.voucher_category"

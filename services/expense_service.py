@@ -178,8 +178,8 @@ def find_expense_by_invoice_number(db: Session, invoice_number: str) -> Expense 
 def list_expenses(
     db: Session,
     status: ExpenseStatus | None = None,
-    date_from: datetime | None = None,
-    date_to: datetime | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
     page: int = 1,
     page_size: int = 20,
     include_inactive: bool = False,
@@ -217,9 +217,9 @@ def list_expenses(
     if status:
         stmt = stmt.where(Expense.status == status)
     if date_from:
-        stmt = stmt.where(Expense.created_at >= date_from)
+        stmt = stmt.where(func.date(Expense.upload_date) >= date_from)
     if date_to:
-        stmt = stmt.where(Expense.created_at <= date_to)
+        stmt = stmt.where(func.date(Expense.upload_date) <= date_to)
     if q:
         pattern = f"%{q}%"
         stmt = stmt.where(
@@ -341,9 +341,9 @@ def get_expenses_for_export(
     if status:
         stmt = stmt.where(Expense.status == status)
     if date_from:
-        stmt = stmt.where(Expense.created_at >= date_from)
+        stmt = stmt.where(func.date(Expense.upload_date) >= date_from)
     if date_to:
-        stmt = stmt.where(Expense.created_at <= date_to)
+        stmt = stmt.where(func.date(Expense.upload_date) <= date_to)
     return list(db.scalars(stmt.limit(limit)).all())
 
 

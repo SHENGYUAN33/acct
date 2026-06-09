@@ -78,8 +78,8 @@ def _classify_tax_type(voucher_category: str | None, voucher_subtype: str | None
 @router.get("/expenses", response_model=dict)
 def list_expenses(
     status: ExpenseStatus | None = Query(default=None, description="Filter by status"),
-    date_from: datetime | None = Query(default=None, description="Filter from date (ISO 8601)"),
-    date_to: datetime | None = Query(default=None, description="Filter to date (ISO 8601)"),
+    date_from: date | None = Query(default=None, description="Filter from date (YYYY-MM-DD)"),
+    date_to: date | None = Query(default=None, description="Filter to date (YYYY-MM-DD, inclusive)"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=200),
     include_inactive: bool = Query(default=False, description="是否包含已作廢（REPLACED_VOID）記錄"),
@@ -126,8 +126,8 @@ def list_expenses(
 @router.get("/expenses/export")
 def export_expenses(
     status: ExpenseStatus | None = Query(default=None),
-    date_from: datetime | None = Query(default=None),
-    date_to: datetime | None = Query(default=None),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     """匯出符合篩選條件的費用清單為 CSV 檔案。"""
