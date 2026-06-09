@@ -89,7 +89,7 @@ AcctAssist RESTful API，分為五個功能群組：
 
 | 參數 | 型別 | 說明 |
 |------|------|------|
-| `status` | `PENDING\|APPROVED\|REJECTED\|NEEDS_MANUAL_REVIEW` | 狀態篩選（可選） |
+| `status` | `PENDING\|APPROVED\|REJECTED\|NEEDS_MANUAL_REVIEW\|WAITING_RETURN\|REPLACED_VOID` | 狀態篩選（可選） |
 | `date_from` | ISO 8601 datetime | 起始時間（可選） |
 | `date_to` | ISO 8601 datetime | 結束時間（可選） |
 | `page` | int ≥ 1，預設 1 | 頁碼 |
@@ -144,7 +144,7 @@ AcctAssist RESTful API，分為五個功能群組：
 
 | Method | Path | 說明 |
 |--------|------|------|
-| `PATCH` | `/api/v1/expenses/{id}/reject` | 退件：設 REJECTED + 原因 + LINE 推播 |
+| `PATCH` | `/api/v1/expenses/{id}/reject` | 退回：設 REJECTED + 原因（作廢，不出現在 CSV） |
 
 **PATCH /reject Request Body：**
 ```json
@@ -301,13 +301,14 @@ AcctAssist RESTful API，分為五個功能群組：
 
 ## ExpenseStatus Enum
 
-| 值 | 說明 |
-|----|------|
-| `PENDING` | 待審核 |
-| `APPROVED` | 已通過 |
-| `REJECTED` | 已退件 |
-| `NEEDS_MANUAL_REVIEW` | 需人工檢視 |
-| `SUPPLEMENTED` | 已補件（Sprint 2 新增） |
+| 值 | 顯示文字 | CSV 匯出 | 說明 |
+|----|---------|---------|------|
+| `PENDING` | 未審核 | ✓ 正常金額 | OCR 成功等待審核 |
+| `APPROVED` | 已核准 | ✓ 正常金額 | 管理員審核通過 |
+| `REJECTED` | 已作廢 | ✗ 不出現 | 管理員退回，純粹作廢 |
+| `NEEDS_MANUAL_REVIEW` | 未審核（需特別注意） | ✓ 正常金額 | OCR 失敗需人工處理 |
+| `WAITING_RETURN` | 待退貨 | ✓ 正常金額 | 等待退貨/換貨憑證 |
+| `REPLACED_VOID` | 已作廢 | ✓ **負數金額** | 換新發票的舊記錄，財務沖銷用 |
 
 ---
 

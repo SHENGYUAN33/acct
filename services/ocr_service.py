@@ -35,7 +35,7 @@ _PROMPT_TEMPLATE = """你是一個具備台灣會計知識的財務審計助理�
   RECEIPT    → 收據、收銀紙、手寫收據（無統一發票字軌）
   LABOR_FORM → 勞務報酬單；含手寫金額＋身分證字號＋收款人簽章
   DEPOSIT    → 押金收據、訂金收據
-  RETURN     → 退貨折讓證明，或含「折讓」、負數金額的單據
+  RETURN     → 退貨折讓證明、折讓單，或含「折讓」、負數金額的單據（含換貨收據、換新發票補件）
   OTHER      → 無法歸入以上任何類型
 
 子類型（voucher_subtype，僅 RECEIPT 與 INVOICE 適用）：
@@ -114,7 +114,7 @@ _PROMPT_TEMPLATE = """你是一個具備台灣會計知識的財務審計助理�
   - invoice_number 若有一字元辨識不確定
     → 給出最可能的值，invoice_number_confidence 設為 0.6
 
-(E) CREDIT_NOTE 金額
+(E) 折讓金額（RETURN + original_invoice_number）
   - total_amount 必須為負數（折讓）
 
 各類型萃取欄位清單：
@@ -128,7 +128,7 @@ _PROMPT_TEMPLATE = """你是一個具備台灣會計知識的財務審計助理�
                    + 子類型額外欄位（ticket_type/receipt_type/fuel_type/
                      bus_operator/train_class/parking_location/highway_name/
                      operator_name/fine_type）
-  CREDIT_NOTE   → seller_name, original_invoice_number, total_amount（負數）, expense_date
+  RETURN（折讓）→ seller_name, original_invoice_number, total_amount（負數）, expense_date
   INSURANCE     → expense_date, insurer_name, insured_name, total_amount,
                    policy_number, insurance_type
   UTILITY       → expense_date, seller_name, total_amount, billing_period,
@@ -166,8 +166,8 @@ overall_confidence = 所有已填欄位信心分數的加權平均（以 total_a
 【補充判斷規則】
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-(F) 折讓單（CREDIT_NOTE）強化識別：
-  核心判斷依據：以下任一特徵 → voucher_category = CREDIT_NOTE
+(F) 折讓單強化識別：
+  核心判斷依據：以下任一特徵 → voucher_category = RETURN，並填入 original_invoice_number
     * 標題含「折讓」、「退貨折讓」、「銷貨退回折讓單」、「折讓證明單」
     * 金額欄位含括號金額（台灣會計負數慣例：如 (1,200) 表示負 1,200 元）
     * 含「原發票字軌號碼」、「原發票號碼：」、「退貨發票號碼」標示欄
@@ -256,10 +256,14 @@ async def classify_and_extract(image_path: str | Path | dict | list) -> VoucherO
 
         result: VoucherOCRResult = response.parsed
 
-        # CREDIT_NOTE：total_amount 必須為負數（防止 Gemini 回傳正值）
-        if result.is_voucher and result.voucher_category == "CREDIT_NOTE":
-            if result.total_amount is not None and result.total_amount > 0:
-                result.total_amount = -result.total_amount
+        # 折讓（RETURN + original_invoice_number）：total_amount 必須為負數
+        is_credit = (
+            result.is_voucher
+            and result.voucher_category in ("RETURN", "CREDIT_NOTE")
+            and result.original_invoice_number
+        )
+        if is_credit and result.total_amount is not None and result.total_amount > 0:
+            result.total_amount = -result.total_amount
 
         result.raw_response = response.text or ""
         result.success = True

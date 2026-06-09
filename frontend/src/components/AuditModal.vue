@@ -4,6 +4,7 @@ import { useExpenseStore } from '../stores/expenseStore'
 import { fetchExpenseImages, updateExpenseImage } from '../api/expenseApi'
 import { getRosterList } from '../api/rosterApi'
 import { fetchDepartments, fetchExpenseCategories, fetchVoucherCategories } from '../api/configApi'
+import { OFFICIAL_VOUCHER_CATEGORIES } from '../constants/voucher.js'
 import { toast } from 'vue3-toastify'
 import {
   ImagePlus,
@@ -20,15 +21,8 @@ import { secureImgUrl, isViewableImage } from '../utils/imageUrl'
 
 const store = useExpenseStore()
 
-// 憑證類別代碼對應中文名稱（動態載入，預設值供 fallback）
-const voucherCategoryOptions = ref([
-  { value: 'INVOICE', label: '發票' },
-  { value: 'RECEIPT', label: '收據' },
-  { value: 'LABOR_FORM', label: '勞報單' },
-  { value: 'DEPOSIT', label: '押金' },
-  { value: 'RETURN', label: '退貨' },
-  { value: 'OTHER', label: '其他' },
-])
+// 憑證類別下拉選項（以 constants 為初始值，API 載入後自動更新）
+const voucherCategoryOptions = ref([...OFFICIAL_VOUCHER_CATEGORIES])
 
 // 費用科目（平面清單，動態載入）
 const expenseCategories = ref([])

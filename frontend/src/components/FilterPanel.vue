@@ -3,18 +3,13 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { SlidersHorizontal, Search, X } from 'lucide-vue-next'
 import { useExpenseStore } from '../stores/expenseStore'
 import { fetchDepartments, fetchVoucherCategories } from '../api/configApi'
+import { FILTER_STATUS_OPTIONS } from '../constants/status.js'
 
 const store = useExpenseStore()
 
 // ── 選項定義 ────────────────────────────────────────────────────
 
-const statusOptions = [
-  { value: '', label: '全部狀態' },
-  { value: 'PENDING', label: '未審核' },
-  { value: 'NEEDS_MANUAL_REVIEW', label: '未審核（需特別注意）' },
-  { value: 'APPROVED', label: '已核准' },
-  { value: 'REPLACED_VOID', label: '已作廢' },
-]
+const statusOptions = FILTER_STATUS_OPTIONS
 
 const deptOptions = ref([])
 const categoryOptions = ref([{ value: '', label: '全部類別' }])

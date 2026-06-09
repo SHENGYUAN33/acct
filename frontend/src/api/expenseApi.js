@@ -70,7 +70,7 @@ export const reorderExpenses = (orderedIds) =>
 
 /**
  * PATCH /api/v1/expenses/{id}/reject
- * 退回單據：將狀態更新為 REPLACED_VOID（作廢），並觸發 LINE 純文字推播（依後端開關）
+ * 退回單據：將狀態更新為 REJECTED（已作廢），並觸發 LINE 純文字推播（依後端開關）
  * @param {string} id - Expense UUID
  */
 export const rejectExpense = (id) =>

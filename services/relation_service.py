@@ -73,11 +73,11 @@ def attach_item_photos_to_waiting_return(
         return None
 
     waiting.item_image_url = list(waiting.item_image_url or []) + item_paths
-    waiting.status = ExpenseStatus.COMPLETED
+    waiting.status = ExpenseStatus.PENDING
     db.commit()
     db.refresh(waiting)
     logger.info(
-        "attach_item_photos_to_waiting_return: COMPLETED expense=%s user=%s (invoice_hint=%s)",
+        "attach_item_photos_to_waiting_return: PENDING expense=%s user=%s (invoice_hint=%s)",
         waiting.serial_number, user_id, invoice_number,
     )
     return waiting
@@ -173,7 +173,7 @@ def _extract_relation(
         if (
             result.success
             and result.is_voucher
-            and result.voucher_category == "CREDIT_NOTE"
+            and result.voucher_category in ("RETURN", "CREDIT_NOTE")
             and result.original_invoice_number
         ):
             return {"type": "CREDIT_NOTE", "invoice_number": result.original_invoice_number}
@@ -373,9 +373,8 @@ def auto_link_records(
             original = find_active_expense_by_invoice_number(db, ref_inv)
 
             if relation["type"] == "VOID_REPLACE" and original:
-                # 作廢舊單
-                original.status = ExpenseStatus.REPLACED_VOID
-                original.is_active = False
+                # 標記原始單為已被換單（保留審核狀態，CSV 以負數計）
+                original.relation_type = "VOID_ORIGINAL"
                 original.void_reason = _extract_void_reason(user_description) or "換貨換單"
                 # 串聯新單
                 new_expense.parent_id = original.id
@@ -418,10 +417,10 @@ def auto_link_records(
                 )
                 if target:
                     new_expense.parent_id = target.id
-                    new_expense.relation_type = "SUPPLEMENT"
+                    new_expense.relation_type = "RETURN_SUPPLEMENT"
                     db.commit()
                     logger.info(
-                        "auto_link_records SUPPLEMENT: new=%s → original=%s",
+                        "auto_link_records RETURN_SUPPLEMENT(補差額): new=%s → original=%s",
                         new_expense.serial_number, target.serial_number,
                     )
 

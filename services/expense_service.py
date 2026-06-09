@@ -8,7 +8,7 @@ from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import select, func, text, nullslast
+from sqlalchemy import or_, select, func, text, nullslast
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -339,8 +339,17 @@ def get_expenses_for_export(
     stmt = select(Expense).order_by(Expense.created_at.desc())
     if not include_inactive:
         stmt = stmt.where(Expense.is_active == True)
+    # REJECTED（管理員退回作廢）不具財務意義，不納入 CSV 匯出
+    stmt = stmt.where(Expense.status != ExpenseStatus.REJECTED)
     if status:
-        stmt = stmt.where(Expense.status == status)
+        # 舊 REPLACED_VOID 與新 VOID_ORIGINAL 無視 status 篩選，永遠強制納入，確保負數沖銷記錄不缺漏
+        stmt = stmt.where(
+            or_(
+                Expense.status == status,
+                Expense.status == ExpenseStatus.REPLACED_VOID,
+                Expense.relation_type == "VOID_ORIGINAL",
+            )
+        )
     if date_from:
         stmt = stmt.where(func.date(Expense.upload_date) >= date_from)
     if date_to:
@@ -360,11 +369,13 @@ def update_expense(
     for field, value in updates.items():
         if hasattr(expense, field):
             setattr(expense, field, value)
-    # 狀態改為非 REPLACED_VOID 時，若 is_active 未被明確設定，自動還原為 True
+    # 狀態改為非 REPLACED_VOID 且非沖銷標記時，若 is_active 未被明確設定，自動還原為 True
     new_status = updates.get("status")
+    new_relation_type = updates.get("relation_type", expense.relation_type)
     if (
         new_status is not None
         and new_status != ExpenseStatus.REPLACED_VOID
+        and new_relation_type != "VOID_ORIGINAL"
         and "is_active" not in updates
         and not expense.is_active
     ):
@@ -559,7 +570,7 @@ def _pick_primary_fields(ocr_results: list[VoucherOCRResult]) -> dict:
             result.success
             and result.is_voucher
             and result.voucher_category
-            and result.voucher_category != "CREDIT_NOTE"
+            and not (result.voucher_category in ("RETURN", "CREDIT_NOTE") and result.original_invoice_number)
             and result.voucher_category not in category_map
         ):
             category_map[result.voucher_category] = result
@@ -669,7 +680,7 @@ def _detect_duplicate_invoice(
 ) -> uuid.UUID | None:
     """偵測同一使用者是否已有相同 invoice_number 的有效報帳。
 
-    排除 REPLACED_VOID（已作廢）；找到則回傳最新那筆的 id，否則回傳 None。
+    排除 REPLACED_VOID（舊格式作廢）與 VOID_ORIGINAL（換單沖銷）；找到則回傳最新那筆的 id，否則回傳 None。
     """
     existing = db.scalar(
         select(Expense.id)
@@ -677,6 +688,7 @@ def _detect_duplicate_invoice(
             Expense.user_id == user_id,
             Expense.invoice_number == invoice_number,
             Expense.status != ExpenseStatus.REPLACED_VOID,
+            Expense.relation_type != "VOID_ORIGINAL",
             Expense.is_active == True,
         )
         .order_by(Expense.created_at.desc())
@@ -725,11 +737,11 @@ def create_batch_expense(
                 if not (r.success and r.is_voucher)
             ]
             existing_waiting.item_image_url = list(existing_waiting.item_image_url or []) + item_paths_for_existing
-            existing_waiting.status = ExpenseStatus.COMPLETED
+            existing_waiting.status = ExpenseStatus.PENDING
             db.commit()
             db.refresh(existing_waiting)
             logger.info(
-                "create_batch_expense Flow B: duplicate invoice=%s → COMPLETED expense=%s",
+                "create_batch_expense Flow B: duplicate invoice=%s → PENDING expense=%s",
                 primary_invoice, existing_waiting.serial_number,
             )
             return existing_waiting
@@ -958,12 +970,12 @@ def reject_expense(
     expense_id: str | uuid.UUID,
     reject_reason: str,
 ) -> Expense | None:
-    """將指定報帳單狀態更新為 REPLACED_VOID（作廢），寫入退回原因。回傳含 user_id 的 Expense 物件。"""
+    """將指定報帳單狀態更新為 REJECTED（已退件），寫入退回原因。回傳含 user_id 的 Expense 物件。"""
     eid = uuid.UUID(expense_id) if isinstance(expense_id, str) else expense_id
     expense = db.get(Expense, eid)
     if not expense:
         return None
-    expense.status = ExpenseStatus.REPLACED_VOID
+    expense.status = ExpenseStatus.REJECTED
     expense.reject_reason = reject_reason
     expense.display_order = None
     db.commit()
@@ -1016,8 +1028,8 @@ def reupload_expense(
     expense.seller_tax_id = seller_tax_id
     expense.seller_name = seller_name
 
-    # 重設狀態：補件成功 → SUPPLEMENTED；OCR 失敗 → NEEDS_MANUAL_REVIEW
-    expense.status = ExpenseStatus.NEEDS_MANUAL_REVIEW if needs_manual_review else ExpenseStatus.SUPPLEMENTED
+    # 重設狀態：補件成功 → PENDING；OCR 失敗 → NEEDS_MANUAL_REVIEW
+    expense.status = ExpenseStatus.NEEDS_MANUAL_REVIEW if needs_manual_review else ExpenseStatus.PENDING
     expense.reject_reason = None
 
     db.commit()

@@ -81,11 +81,12 @@ AcctAssist 使用 PostgreSQL 16 + SQLAlchemy 2.0 ORM。
 
 | 值 | 說明 | 進入條件 |
 |----|------|---------|
-| `PENDING` | 待審核 | OCR 成功且 total_amount 有值 |
-| `APPROVED` | 已通過 | 財務審核通過 |
-| `REJECTED` | 已退件 | 財務退件（需填原因） |
-| `NEEDS_MANUAL_REVIEW` | 需人工檢視 | OCR 失敗或 total_amount 為 null |
-| `SUPPLEMENTED` | 已補件 | 補件 OCR 成功後自動設定（Sprint 2） |
+| `PENDING` | 待審核 | OCR 成功且 total_amount 有值；或待退貨流程完成後 |
+| `APPROVED` | 已核准 | 管理員審核通過 |
+| `REJECTED` | 已作廢 | 管理員退回，該筆作廢，流程結束 |
+| `NEEDS_MANUAL_REVIEW` | 未審核（需特別注意） | OCR 失敗或 total_amount 為 null |
+| `WAITING_RETURN` | 待退貨 | 使用者標記待退貨 |
+| `REPLACED_VOID` | 已作廢（沖銷） | 換單/折讓三種情境下的舊交易 |
 
 **索引**：`user_id`（FK 索引）、`status`（篩選用）、`upload_date`（排序/篩選用）
 

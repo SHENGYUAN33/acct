@@ -7,30 +7,24 @@
 統一從此模組 import，不要在各自檔案中重複定義。
 """
 
-# ── 憑證類別 → 中文 ────────────────────────────────────────────────
+# ── 憑證類別 → 中文（與 config/expense_categories.json voucher_categories 同源）──
 VOUCHER_CATEGORY_ZH: dict[str, str] = {
-    "INVOICE": "發票",
-    "RECEIPT": "收據",
-    "TRANSPORTATION": "交通票據",
-    "ACCOMMODATION": "住宿",
-    "LABOR_SERVICE": "勞務費",
-    "UTILITY": "水電費",
-    "RENTAL": "租金",
-    "INSURANCE": "保險",
-    "POSTAGE": "郵資",
-    "CREDIT_NOTE": "折讓單",
-    "OTHER": "其他",
+    "INVOICE":    "發票",
+    "RECEIPT":    "收據",
+    "LABOR_FORM": "勞保",
+    "DEPOSIT":    "押金",
+    "RETURN":     "退貨",
+    "OTHER":      "其他",
+    "CREDIT_NOTE": "退貨",  # 舊資料相容
 }
 
 # ── 費用狀態 → 中文 ────────────────────────────────────────────────
 STATUS_ZH: dict[str, str] = {
-    "PENDING": "待審核",
+    "PENDING": "未審核",
     "APPROVED": "已核准",
-    "REJECTED": "已退件",
-    "NEEDS_MANUAL_REVIEW": "需人工審核",
-    "SUPPLEMENTED": "已補件",
+    "REJECTED": "已作廢",
+    "NEEDS_MANUAL_REVIEW": "未審核（需特別注意）",
     "WAITING_RETURN": "待退貨",
-    "COMPLETED": "已結清",
     "REPLACED_VOID": "已作廢（沖銷）",
 }
 

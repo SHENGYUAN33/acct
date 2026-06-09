@@ -13,8 +13,11 @@
 
 #### 1. 退回機制重構 — 改為作廢原單 + LINE 純文字通知
 
+> ⚠️ **2026-06-10 決策還原**：`reject_expense()` 已改回設定 `REJECTED`（非 `REPLACED_VOID`）。
+> `REPLACED_VOID` 僅用於換單/折讓三種情境，不用於一般退回。
+
 - **需求**：退回單據時，原單不再標記 `REJECTED`，改標記為 `REPLACED_VOID`（作廢）；Dashboard 該列視覺灰化反白；LINE 通知改為純文字（移除重新上傳按鈕）
-- **`services/expense_service.py`**：`reject_expense()` 改寫 `REJECTED` → `REPLACED_VOID`
+- **`services/expense_service.py`**：`reject_expense()` 改寫 `REJECTED` → `REPLACED_VOID`（已還原）
 - **`services/line_service.py`**：`push_reject_notification()` 由 Flex Message 改為純文字，顯示上傳日期、發票號碼、發票金額，並附備註「此發票已退回請重新上傳」；函式簽名同步縮減（移除 `expense_id`、`serial_number`、`reject_reason` 參數）
 - **`routers/expenses.py`**：reject 端點改傳 `upload_date`、`invoice_number`、`total_amount` 給推播函式
 - **`frontend/src/components/ExpenseTable.vue`**：`REPLACED_VOID` 列套用 `opacity-40 bg-gray-100`，視覺灰化

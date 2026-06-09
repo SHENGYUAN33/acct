@@ -420,7 +420,8 @@ async def process_session_background(
 
         # 情境B：偵測到折讓單時，強制所有圖片合併為單一群組（不拆分）
         has_credit_note = is_return_supplement and any(
-            r.voucher_category == "CREDIT_NOTE" for r in ocr_stubs
+            r.voucher_category in ("RETURN", "CREDIT_NOTE") and r.original_invoice_number
+            for r in ocr_stubs
         )
 
         # 切割模式：batch = 依憑證斷點切割；single = 全部視為一群組
@@ -492,7 +493,7 @@ async def process_session_background(
                 )
                 if is_return_supplement:
                     # 情境B：OCR 偵測到折讓單
-                    if any(r.voucher_category == "CREDIT_NOTE" for r in group_ocr_stubs):
+                    if any(r.voucher_category in ("RETURN", "CREDIT_NOTE") and r.original_invoice_number for r in group_ocr_stubs):
                         expense.relation_type = "CREDIT_NOTE"
                     # 情境A：使用者填了舊發票號碼
                     elif wr_original_invoice:

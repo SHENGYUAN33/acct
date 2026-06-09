@@ -50,11 +50,11 @@
     { "key": "HR_WELFARE_GENERAL", "label": "勞-職工福利" }
   ],
   "voucher_categories": [
-    { "key": "INVOICE", "label": "發票" },
-    { "key": "RECEIPT", "label": "收據" },
-    { "key": "LABOR_FORM", "label": "勞報單" },
-    { "key": "DEPOSIT", "label": "押金" },
-    { "key": "RETURN", "label": "退貨" },
-    { "key": "OTHER", "label": "其他" }
+    { "key": "INVOICE",    "label": "發票" },
+    { "key": "RECEIPT",    "label": "收據" },
+    { "key": "LABOR_FORM", "label": "勞保" },
+    { "key": "DEPOSIT",    "label": "押金" },
+    { "key": "RETURN",     "label": "退貨" },
+    { "key": "OTHER",      "label": "其他" }
   ]
 }

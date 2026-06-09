@@ -4,6 +4,8 @@ import { X, Loader2, ImageOff } from 'lucide-vue-next'
 import { fetchBatchExpenses } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
 import { secureImgUrl as imgUrl, isViewableImage } from '../utils/imageUrl'
+import { getStatusConfig } from '../constants/status.js'
+import { getVoucherLabel } from '../constants/voucher.js'
 
 const props = defineProps({
   expenseId: { type: String, required: true },
@@ -15,44 +17,7 @@ const batchExpenses = ref([])
 
 const expense = computed(() => batchExpenses.value[0] ?? null)
 
-const STATUS_LABEL = {
-  PENDING: '待審核',
-  APPROVED: '已核准',
-  REJECTED: '已退回',
-  NEEDS_MANUAL_REVIEW: '需人工審核',
-  SUPPLEMENTED: '已補件',
-  REPLACED_VOID: '已作廢',
-  WAITING_RETURN: '待退款',
-  COMPLETED: '已完成',
-}
 
-const STATUS_DOT = {
-  PENDING: 'bg-yellow-400',
-  APPROVED: 'bg-green-500',
-  REJECTED: 'bg-red-500',
-  NEEDS_MANUAL_REVIEW: 'bg-orange-400',
-  SUPPLEMENTED: 'bg-blue-400',
-  REPLACED_VOID: 'bg-gray-400',
-  WAITING_RETURN: 'bg-purple-400',
-  COMPLETED: 'bg-teal-500',
-}
-
-const CATEGORY_LABEL = {
-  INVOICE: '發票',
-  RECEIPT: '收據',
-  LABOR_SERVICE: '勞報',
-  TRANSPORTATION: '交通',
-  CREDIT_NOTE: '退貨折讓',
-  INSURANCE: '保險',
-  UTILITY: '水電',
-  RENTAL: '租金',
-  ACCOMMODATION: '住宿',
-  POSTAGE: '郵資',
-}
-
-function categoryLabel(code) {
-  return CATEGORY_LABEL[code] ?? code ?? '—'
-}
 
 async function loadBatch() {
   isLoading.value = true
@@ -94,10 +59,10 @@ onMounted(loadBatch)
             <div v-if="!isLoading && expense" class="flex items-center gap-2 mt-1">
               <span
                 class="w-2 h-2 rounded-full shrink-0"
-                :class="STATUS_DOT[expense.status] ?? 'bg-gray-300'"
+                :class="getStatusConfig(expense.status).dot"
               ></span>
               <span class="text-xs font-mono font-semibold text-gray-700">{{ expense.serial_number }}</span>
-              <span class="text-xs text-gray-400">{{ STATUS_LABEL[expense.status] ?? expense.status }}</span>
+              <span class="text-xs text-gray-400">{{ getStatusConfig(expense.status).label }}</span>
               <span v-if="expense.total_amount != null" class="text-xs font-medium text-gray-600">
                 NT${{ Number(expense.total_amount).toLocaleString() }}
               </span>
@@ -176,7 +141,7 @@ onMounted(loadBatch)
                   v-if="img.voucher_category"
                   class="text-[10px] bg-blue-50 text-blue-600 font-medium px-1.5 py-0.5 rounded leading-tight"
                 >
-                  {{ categoryLabel(img.voucher_category) }}
+                  {{ getVoucherLabel(img.voucher_category) }}
                 </span>
               </div>
 

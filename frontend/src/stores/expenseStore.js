@@ -14,25 +14,7 @@ import {
 } from '../api/expenseApi'
 
 import { secureImgUrl } from '../utils/imageUrl'
-
-// 憑證類別代碼對應中文名稱（含新 6 種代碼與舊代碼 fallback）
-const CATEGORY_LABEL = {
-  INVOICE: '發票',
-  RECEIPT: '收據',
-  LABOR_FORM: '勞報單',
-  DEPOSIT: '押金',
-  RETURN: '退貨',
-  OTHER: '其他',
-  // 舊代碼 fallback
-  LABOR_SERVICE: '勞報',
-  TRANSPORTATION: '交通',
-  CREDIT_NOTE: '退貨折讓',
-  INSURANCE: '保險',
-  UTILITY: '水電',
-  RENTAL: '租金',
-  ACCOMMODATION: '住宿',
-  POSTAGE: '郵資',
-}
+import { getVoucherLabel } from '../constants/voucher.js'
 
 /**
  * 將後端 Expense 物件 map 成前端所需的完整 shape
@@ -59,11 +41,11 @@ function mapExpense(item, index) {
     // Sprint 2 新增欄位
     // voucher_categories：已 parse 的陣列，供表格直接顯示中文標籤
     voucher_categories: voucherCategories
-      ? voucherCategories.map(cat => CATEGORY_LABEL[cat] ?? cat)
+      ? voucherCategories.map(cat => getVoucherLabel(cat))
       : null,
     // certificate_type：沿用舊欄位（取第一項中文，供 AuditModal 等處顯示）
     certificate_type: voucherCategories?.[0]
-      ? (CATEGORY_LABEL[voucherCategories[0]] ?? voucherCategories[0])
+      ? getVoucherLabel(voucherCategories[0])
       : (item.certificate_type ?? null),
     user_description: item.user_description ?? null,
     image_count: item.image_count ?? 1,

@@ -74,11 +74,12 @@ N 秒後 → _auto_split_callback → auto_split_process()
 | 部門名稱（如「攝影組」） | 更換部門 |
 
 **狀態對應文字：**
-- `PENDING` → 審核中
+- `PENDING` → 待審核
 - `APPROVED` → 已核准
-- `REJECTED` → 已退回（含退件原因）
-- `NEEDS_MANUAL_REVIEW` → 人工審核中
-- `SUPPLEMENTED` → ⚠️ 已補件
+- `REJECTED` → 已作廢（管理員退回，流程結束）
+- `NEEDS_MANUAL_REVIEW` → 未審核（需特別注意）
+- `WAITING_RETURN` → 待退貨
+- `REPLACED_VOID` → 已作廢（沖銷）（換單/折讓情境）
 
 ### 重複發票偵測
 
@@ -130,7 +131,7 @@ POST /api/v1/auth/register（JSON）
 **支援篩選：**
 | 篩選條件 | 說明 |
 |---------|------|
-| `status` | PENDING / APPROVED / REJECTED / NEEDS_MANUAL_REVIEW / SUPPLEMENTED |
+| `status` | PENDING / APPROVED / REJECTED / NEEDS_MANUAL_REVIEW / WAITING_RETURN / REPLACED_VOID |
 | `date_from` / `date_to` | 上傳日期範圍 |
 | `dept` | 部門篩選（前端過濾） |
 | `submitter` | 姓名模糊搜尋（前端過濾） |

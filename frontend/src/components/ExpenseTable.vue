@@ -3,25 +3,19 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useExpenseStore } from '../stores/expenseStore'
 import { getExpense, fetchExpenses, fetchRelatedExpenses, resolveDuplicate, updateExpense as apiUpdateExpense } from '../api/expenseApi'
 import { fetchVoucherCategories } from '../api/configApi'
+import { VOUCHER_LABEL_MAP } from '../constants/voucher.js'
 import { toast } from 'vue3-toastify'
-import { Pencil, Trash2, Plus, ChevronsUpDown, ChevronRight, Link2, GripVertical, Unlink2 } from 'lucide-vue-next'
+import { Pencil, Trash2, Plus, ChevronsUpDown, ChevronRight, Link2, GripVertical, Unlink2, Loader2 } from 'lucide-vue-next'
+import { getStatusConfig } from '../constants/status.js'
+import { getRelationTypeConfig, EDITABLE_RELATION_TYPES, RELATION_TYPE_OPTIONS } from '../constants/relationType.js'
 import ConfirmModal from './ConfirmModal.vue'
 import BatchGroupModal from './BatchGroupModal.vue'
 import { secureImgUrl, isViewableImage } from '../utils/imageUrl'
 
 const store = useExpenseStore()
 
-// 憑證類別代碼 → 中文（含舊代碼 fallback）
-const LEGACY_VOUCHER_LABEL = {
-  INVOICE: '發票', RECEIPT: '收據', LABOR_SERVICE: '勞報',
-  TRANSPORTATION: '交通', CREDIT_NOTE: '退貨折讓',
-  INSURANCE: '保險', UTILITY: '水電', RENTAL: '租金',
-  ACCOMMODATION: '住宿', POSTAGE: '郵資',
-  LABOR_FORM: '勞報單', DEPOSIT: '押金', RETURN: '退貨', OTHER: '其他',
-}
-
-// 動態載入的憑證類別對應表
-const voucherLabelMap = ref({ ...LEGACY_VOUCHER_LABEL })
+// 動態憑證類別對應表（以 constants 為初始值，API 載入後自動更新）
+const voucherLabelMap = ref({ ...VOUCHER_LABEL_MAP })
 
 onMounted(async () => {
   try {
@@ -74,6 +68,36 @@ watch(() => store.expenses, async () => {
   }
 })
 
+// ── 補件類型 inline 下拉
+const relationTypeDropdownId = ref(null)
+const updatingRelTypeId = ref(null)
+
+
+async function changeRelationType(expense, newType) {
+  relationTypeDropdownId.value = null
+  if (newType === expense.relation_type) return
+  updatingRelTypeId.value = expense.id
+  try {
+    const ops = []
+    ops.push(apiUpdateExpense(expense.id, { relation_type: newType, dismissed_from_waiting_return: false }))
+    // 原類型是 VOID_REPLACE 且已配對 → 還原 parent（回到待退貨、清除沖銷標記）
+    if (expense.relation_type === 'VOID_REPLACE' && expense.parent_id) {
+      ops.push(apiUpdateExpense(expense.parent_id, { relation_type: null, status: 'WAITING_RETURN' }))
+    }
+    // 新類型是 VOID_REPLACE 且已配對 → 把 parent 標記為 VOID_ORIGINAL
+    if (newType === 'VOID_REPLACE' && expense.parent_id) {
+      ops.push(apiUpdateExpense(expense.parent_id, { relation_type: 'VOID_ORIGINAL', status: 'PENDING' }))
+    }
+    await Promise.all(ops)
+    await store.fetchExpenses()
+    toast.success('補件類型已更新')
+  } catch {
+    toast.error('更新失敗，請稍後再試')
+  } finally {
+    updatingRelTypeId.value = null
+  }
+}
+
 // 批次組 Modal
 const batchModalExpenseId = ref(null)
 function openBatchModal(expense) { batchModalExpenseId.value = expense.id }
@@ -118,21 +142,6 @@ async function toggleExpand(expense) {
   expandedRows.value = next
 }
 
-// 狀態設定
-const statusConfig = {
-  PENDING: { dot: 'bg-red-500', label: '未審核', textColor: 'text-red-500' },
-  APPROVED: { dot: 'bg-green-500', label: '已核准', textColor: 'text-green-600' },
-  REJECTED: { dot: 'bg-gray-400', label: '已退回', textColor: 'text-gray-500' },
-  NEEDS_MANUAL_REVIEW: { dot: 'bg-orange-400', label: '未審核\n(需特別注意!)', textColor: 'text-orange-500' },
-  SUPPLEMENTED: { dot: 'bg-yellow-400', label: '已補件', textColor: 'text-yellow-600' },
-  WAITING_RETURN: { dot: 'bg-orange-500', label: '待退貨', textColor: 'text-orange-600' },
-  COMPLETED: { dot: 'bg-teal-500', label: '已結清', textColor: 'text-teal-600' },
-  REPLACED_VOID: { dot: 'bg-gray-300', label: '已作廢', textColor: 'text-gray-400' },
-}
-
-function getStatusConfig(status) {
-  return statusConfig[status] || statusConfig.PENDING
-}
 
 // 確認刪除 Modal 狀態
 const isConfirmOpen = ref(false)
@@ -199,7 +208,7 @@ function formatDateTime(val) {
 // 已配對的補件（parent_id 已設定）不在主表格顯示（改由父憑證展開子列呈現）
 const visibleExpenses = computed(() =>
   store.paginatedExpenses.filter(e =>
-    !(e.relation_type === 'RETURN_SUPPLEMENT' && e.referenced_invoice_number) &&
+    !(e.relation_type === 'RETURN_SUPPLEMENT' && e.referenced_invoice_number && !e.dismissed_from_waiting_return) &&
     !e.parent_id
   ).map(e => addExpenseCategoryDisplay(e))
 )
@@ -258,12 +267,10 @@ async function handleUnlinkSupplement(parentExpense, sup) {
         referenced_invoice_number: null,
       }),
     ]
-    // finalizeCase 後父憑證狀態為 PENDING，解除時還原為 WAITING_RETURN
-    if (parentExpense.status === 'PENDING') {
-      ops.push(apiUpdateExpense(parentExpense.id, { status: 'WAITING_RETURN' }))
-    }
+    // 解除配對後，父憑證回到待退貨（WAITING_RETURN）並清除沖銷標記
+    ops.push(apiUpdateExpense(parentExpense.id, { status: 'WAITING_RETURN', relation_type: null }))
     await Promise.all(ops)
-    toast.success(`補件 ${sup.serial_number} 已解除配對，移回待退貨管理`)
+    toast.success(`補件 ${sup.serial_number} 已解除配對，原始憑證改回未審核`)
     // 從快取陣列中移除已解除的補件
     const remaining = (supplementCache.value[parentExpense.id] || []).filter(s => s.id !== sup.id)
     supplementCache.value = { ...supplementCache.value, [parentExpense.id]: remaining }
@@ -354,14 +361,14 @@ async function handleUnlinkSupplement(parentExpense, sup) {
             <tr
               class="border-b border-gray-100 transition-colors"
               :class="[
-                expense.status === 'REPLACED_VOID'
+                (expense.status === 'REPLACED_VOID' || expense.status === 'REJECTED')
                   ? 'opacity-40 bg-gray-100'
                   : dragOverId === expense.id && draggedId !== expense.id
                     ? 'bg-blue-50 border-t-2 border-blue-400'
                     : draggedId === expense.id
                       ? 'opacity-50 bg-yellow-50'
                       : 'hover:bg-gray-50',
-                expandedRows.has(expense.id) && expense.status !== 'REPLACED_VOID' ? 'bg-gray-50' : ''
+                expandedRows.has(expense.id) && expense.status !== 'REPLACED_VOID' && expense.status !== 'REJECTED' ? 'bg-gray-50' : ''
               ]"
               draggable="true"
               @dragstart="onDragStart($event, expense)"
@@ -486,21 +493,55 @@ async function handleUnlinkSupplement(parentExpense, sup) {
                   >
                     {{ getStatusConfig(expense.status).label }}
                   </span>
+                  <!-- 系統管理 badge（不可修改） -->
                   <span
-                    v-if="expense.relation_type === 'VOID_REPLACE'"
+                    v-if="expense.relation_type === 'VOID_ORIGINAL'"
                     class="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 border border-red-200"
-                    :title="`換單（原單：${expense.referenced_invoice_number || '?'}）`"
-                  >換單</span>
-                  <span
-                    v-else-if="expense.relation_type === 'CREDIT_NOTE'"
-                    class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-600 border border-purple-200"
-                    :title="`折讓單（原單：${expense.referenced_invoice_number || '?'}）`"
-                  >折讓</span>
-                  <span
-                    v-else-if="expense.relation_type === 'SUPPLEMENT'"
-                    class="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-600 border border-blue-200"
-                    title="差額補足"
-                  >補足</span>
+                    :title="`此憑證已被換單取代，CSV 匯出顯示負數${expense.void_reason ? '（' + expense.void_reason + '）' : ''}`"
+                  >沖銷</span>
+                  <!-- 可修改的補件類型 badge（點擊展開下拉） -->
+                  <template v-else-if="EDITABLE_RELATION_TYPES.includes(expense.relation_type)">
+                    <div
+                      v-if="relationTypeDropdownId === expense.id"
+                      class="fixed inset-0 z-10"
+                      @click="relationTypeDropdownId = null"
+                    />
+                    <div class="relative z-20 inline-block">
+                      <button
+                        @click.stop="relationTypeDropdownId = relationTypeDropdownId === expense.id ? null : expense.id"
+                        :disabled="updatingRelTypeId === expense.id"
+                        class="text-[10px] px-1.5 py-0.5 rounded border cursor-pointer hover:opacity-75 transition-opacity disabled:opacity-50 flex items-center gap-0.5"
+                        :class="getRelationTypeConfig(expense.relation_type)?.badgeClass"
+                        title="點擊可修改補件類型"
+                      >
+                        <Loader2 v-if="updatingRelTypeId === expense.id" :size="10" class="animate-spin" />
+                        <template v-else>
+                          {{ getRelationTypeConfig(expense.relation_type)?.label }}
+                          <span class="opacity-50 text-[9px]">▾</span>
+                        </template>
+                      </button>
+                      <div
+                        v-if="relationTypeDropdownId === expense.id"
+                        class="absolute left-0 top-full mt-0.5 z-20 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden"
+                        style="min-width: 92px"
+                        @click.stop
+                      >
+                        <button
+                          v-for="opt in RELATION_TYPE_OPTIONS"
+                          :key="opt.value"
+                          @click="changeRelationType(expense, opt.value)"
+                          class="w-full text-left text-[11px] px-2.5 py-1.5 transition-colors flex items-center gap-1.5"
+                          :class="[opt.optionClass, (expense.relation_type === opt.value || (expense.relation_type === 'SUPPLEMENT' && opt.value === 'RETURN_SUPPLEMENT')) ? 'font-semibold' : 'text-gray-600']"
+                        >
+                          <span
+                            class="w-1.5 h-1.5 rounded-full inline-block shrink-0"
+                            :class="(expense.relation_type === opt.value || (expense.relation_type === 'SUPPLEMENT' && opt.value === 'RETURN_SUPPLEMENT')) ? 'bg-current' : 'border border-gray-300'"
+                          />
+                          {{ opt.label }}
+                        </button>
+                      </div>
+                    </div>
+                  </template>
                   <span
                     v-if="!expense.is_active"
                     class="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-500 border border-gray-300"

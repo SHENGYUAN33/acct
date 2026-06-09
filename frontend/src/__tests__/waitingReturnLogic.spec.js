@@ -58,19 +58,9 @@ function countActiveFilters(filterObj) {
   return Object.values(filterObj).filter(v => v !== '').length
 }
 
-// ── 常數 ─────────────────────────────────────────────────────────────────
-
-const STATUS_LABEL = {
-  PENDING: '待審核', APPROVED: '已核准', REJECTED: '已退回',
-  NEEDS_MANUAL_REVIEW: '需人工審核', SUPPLEMENTED: '已補件',
-  REPLACED_VOID: '已作廢', WAITING_RETURN: '待退貨', COMPLETED: '已結清',
-}
-
-const VOUCHER_CATEGORY_LABEL = {
-  INVOICE: '電子發票', RECEIPT: '收據', TRANSPORTATION: '交通票據',
-  LABOR_SERVICE: '勞務服務', INSURANCE: '保險', RENTAL: '租金',
-  ACCOMMODATION: '住宿', UTILITY: '水電費', POSTAGE: '郵寄費用',
-}
+// ── 常數（從單一來源 import，不再各自定義）────────────────────────────────
+import { STATUS_CONFIG } from '../constants/status.js'
+import { VOUCHER_LABEL_MAP } from '../constants/voucher.js'
 
 // ── Tests ─────────────────────────────────────────────────────────────────
 
@@ -216,43 +206,43 @@ describe('進階篩選條件計數', () => {
   })
 })
 
-describe('STATUS_LABEL 常數完整性', () => {
+describe('STATUS_CONFIG 常數完整性', () => {
   const expectedStatuses = [
     'PENDING', 'APPROVED', 'REJECTED', 'NEEDS_MANUAL_REVIEW',
-    'SUPPLEMENTED', 'REPLACED_VOID', 'WAITING_RETURN', 'COMPLETED',
+    'WAITING_RETURN', 'REPLACED_VOID',
   ]
 
-  it('TC-CONST-01: STATUS_LABEL 應涵蓋後端所有 ExpenseStatus 值', () => {
+  it('TC-CONST-01: STATUS_CONFIG 應涵蓋所有使用中的 ExpenseStatus 值', () => {
     for (const status of expectedStatuses) {
-      expect(STATUS_LABEL[status]).toBeDefined()
-      expect(STATUS_LABEL[status]).not.toBe('')
+      expect(STATUS_CONFIG[status]).toBeDefined()
+      expect(STATUS_CONFIG[status].label).not.toBe('')
     }
   })
 
   it('TC-CONST-02: WAITING_RETURN 狀態顯示文字應為「待退貨」', () => {
-    expect(STATUS_LABEL.WAITING_RETURN).toBe('待退貨')
+    expect(STATUS_CONFIG.WAITING_RETURN.label).toBe('待退貨')
   })
 
-  it('TC-CONST-03: COMPLETED 狀態顯示文字應為「已結清」', () => {
-    expect(STATUS_LABEL.COMPLETED).toBe('已結清')
+  it('TC-CONST-03: NEEDS_MANUAL_REVIEW 狀態顯示文字應為「未審核（需特別注意）」', () => {
+    expect(STATUS_CONFIG.NEEDS_MANUAL_REVIEW.label).toBe('未審核（需特別注意）')
   })
 
-  it('TC-CONST-04: REPLACED_VOID 狀態顯示文字應為「已作廢」', () => {
-    expect(STATUS_LABEL.REPLACED_VOID).toBe('已作廢')
+  it('TC-CONST-04: REPLACED_VOID 狀態顯示文字應為「已作廢（沖銷）」', () => {
+    expect(STATUS_CONFIG.REPLACED_VOID.label).toBe('已作廢（沖銷）')
   })
 })
 
-describe('VOUCHER_CATEGORY_LABEL 常數完整性', () => {
-  it('TC-CONST-05: INVOICE 類別顯示文字應為「電子發票」', () => {
-    expect(VOUCHER_CATEGORY_LABEL.INVOICE).toBe('電子發票')
+describe('VOUCHER_LABEL_MAP 常數完整性', () => {
+  it('TC-CONST-05: INVOICE 類別顯示文字應為「發票」', () => {
+    expect(VOUCHER_LABEL_MAP.INVOICE).toBe('發票')
   })
 
-  it('TC-CONST-06: TRANSPORTATION 類別應有對應標籤', () => {
-    expect(VOUCHER_CATEGORY_LABEL.TRANSPORTATION).toBeDefined()
+  it('TC-CONST-06: TRANSPORTATION 類別應有對應標籤（舊代碼 fallback）', () => {
+    expect(VOUCHER_LABEL_MAP.TRANSPORTATION).toBeDefined()
   })
 
-  it('TC-CONST-07: 所有 VOUCHER_CATEGORY_LABEL 值均非空字串', () => {
-    Object.entries(VOUCHER_CATEGORY_LABEL).forEach(([key, val]) => {
+  it('TC-CONST-07: 所有 VOUCHER_LABEL_MAP 值均非空字串', () => {
+    Object.entries(VOUCHER_LABEL_MAP).forEach(([key, val]) => {
       expect(val).not.toBe('')
       expect(typeof val).toBe('string')
     })
