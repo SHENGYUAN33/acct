@@ -35,9 +35,9 @@ def get_account_roles() -> dict:
 
 @router.get("/expense-categories")
 def get_expense_categories() -> dict:
-    """回傳費用父子科目完整清單（由 config/expense_categories.json 控制）。"""
+    """回傳費用科目平面清單（由 config/expense_categories.json 控制）。"""
     data = _load_expense_categories()
-    return ok(data={"parents": data["parents"]})
+    return ok(data={"categories": data["categories"]})
 
 
 @router.get("/voucher-categories")

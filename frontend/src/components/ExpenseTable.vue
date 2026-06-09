@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useExpenseStore } from '../stores/expenseStore'
 import { getExpense, fetchExpenses, fetchRelatedExpenses, resolveDuplicate, updateExpense as apiUpdateExpense } from '../api/expenseApi'
-import { fetchExpenseCategories, fetchVoucherCategories } from '../api/configApi'
+import { fetchVoucherCategories } from '../api/configApi'
 import { toast } from 'vue3-toastify'
 import { Pencil, Trash2, Plus, ChevronsUpDown, ChevronRight, Link2, GripVertical, Unlink2 } from 'lucide-vue-next'
 import ConfirmModal from './ConfirmModal.vue'
@@ -20,32 +20,14 @@ const LEGACY_VOUCHER_LABEL = {
   LABOR_FORM: '勞報單', DEPOSIT: '押金', RETURN: '退貨', OTHER: '其他',
 }
 
-// 動態載入的類別資料
+// 動態載入的憑證類別對應表
 const voucherLabelMap = ref({ ...LEGACY_VOUCHER_LABEL })
-// child label → parent label 對應表（e.g. '高鐵/台鐵/客運/遊覽車' → '勞-交通費'）
-const childToParentLabel = ref({})
-// parent key → parent label 對應表（e.g. 'TRANSPORTATION' → '勞-交通費'）
-const parentKeyToLabel = ref({})
 
 onMounted(async () => {
   try {
-    const [vcRes, catRes] = await Promise.all([
-      fetchVoucherCategories(),
-      fetchExpenseCategories(),
-    ])
-    // 更新憑證類別對應表
+    const vcRes = await fetchVoucherCategories()
     const vcList = vcRes.data?.data?.voucher_categories ?? []
     vcList.forEach(v => { voucherLabelMap.value[v.key] = v.label })
-    // 建立子科目 → 父科目 label 的反查表，以及父科目 key → label 查找表
-    const parents = catRes.data?.data?.parents ?? []
-    const childMap = {}
-    const parentMap = {}
-    parents.forEach(p => {
-      parentMap[p.key] = p.label
-      p.children.forEach(c => { childMap[c.label] = p.label })
-    })
-    childToParentLabel.value = childMap
-    parentKeyToLabel.value = parentMap
   } catch {
     // fallback：使用預設值
   }
@@ -227,18 +209,7 @@ function addExpenseCategoryDisplay(exp) {
   const parsed = raw
     ? (typeof raw === 'string' ? JSON.parse(raw) : raw)
     : null
-  return {
-    ...exp,
-    expense_categories_display: parsed
-      ? parsed.map(value => {
-          const parent = childToParentLabel.value[value]
-          if (parent) return `${parent} > ${value}`
-          const parentLabel = parentKeyToLabel.value[value]
-          if (parentLabel) return parentLabel
-          return value
-        })
-      : null,
-  }
+  return { ...exp, expense_categories_display: parsed ?? null }
 }
 
 // ── 拖曳排序 ─────────────────────────────────────────────────────

@@ -18,8 +18,8 @@ export const fetchAccountRoles = () =>
 
 /**
  * GET /api/v1/config/expense-categories
- * 取得費用父子科目完整清單（公開端點，不需 JWT）
- * @returns {Promise<{parents: Array}>} 父科目陣列，每項含 key/label/note/children
+ * 取得費用科目平面清單（公開端點，不需 JWT）
+ * @returns {Promise<{categories: Array}>} 科目陣列，每項含 key/label
  */
 export const fetchExpenseCategories = () =>
   apiClient.get('/api/v1/config/expense-categories')

@@ -55,59 +55,36 @@ MULTI_TASK_PROMPT = """你是一個具備台灣會計知識的財務審計助理
     GENERAL        捷運票、其他交通單據
   其餘類型 voucher_subtype 填 null
 
-━━ 步驟 1B：費用父科目（expense_parent_category）━━
-從以下 15 個父科目選一，填入對應的 key：
+━━ 步驟 1B：費用科目（expense_category）━━
+從以下清單選一，填入**完整中文名稱（含「勞-」前綴）**：
 
-  MEAL           → 餐廳、便當、咖啡廳、飲料；誤餐補貼；飲用水
-  RENTAL         → 場地/攝影棚租借；辦公室租金；辦公用品租金；車輛租金
-  TRANSPORTATION → 所有交通費（高鐵/台鐵/客運/遊覽車/計程車/油資/停車/過路/罰單）
-  UTILITY        → 電費、水費、瓦斯費、電信費、網路費
-  ACCOMMODATION  → 飯店、民宿、旅館帳單（含 check-in/check-out）
-  OFFICE_SUPPLY  → 文具、辦公耗材、印刷、郵資、快遞
-  PRODUCTION_SUPPLIES → 無法歸入以上任何類別（預設 catch-all）
-  LABOR          → 勞務報酬單；薪資/薪水/人員費用
-  PERFORMANCE    → 演員費、臨演費（勞報單格式）
-  ENTERTAINMENT  → 交際餐敘、公關費用
-  ART            → 置景/陳設耗材；美術道具（購買/租金）；劇本費
-  COSTUME        → 造型化妝費；特殊化妝費；服裝（購買/租金）
-  EQUIPMENT      → 場務/燈光/攝影/收音/航拍器材（購買或遺失損壞申報）
-  POST_PROD      → 剪接製作費；特效素材費；硬碟/記憶卡等檔管物品
-  HR_WELFARE     → 職工福利；保險費
+  勞-勞務費 /
+  勞-餐飲費 / 勞-誤餐費 / 勞-飲用水 /
+  勞-場地租金 / 勞-辦公室租金 / 勞-辦公室用品租金 / 勞-車輛租金 /
+  勞-住宿費 / 勞-水電瓦斯費 / 勞-電信/網路費 /
+  勞-文具用品 / 勞-郵電費 /
+  勞-交通費-高鐵、台鐵、客運、遊覽車 / 勞-交通費-計程車資 / 勞-交通費-過路費 /
+  勞-交通費-罰單 / 勞-交通費-停車費 / 勞-交通費-油資 /
+  勞-保險費 / 勞-現場拍攝用品購買 / 勞-雜費 /
+  勞-劇本費 / 勞-交際費 / 勞-演出費 / 勞-臨演演出費 /
+  勞-置景材料耗材費 / 勞-陳設材料耗材費 / 勞-美術道具費 / 勞-美術道具租金 /
+  勞-造型化妝費 / 勞-特殊化妝費 / 勞-服裝費 / 勞-服裝租金 /
+  勞-場務器材費 / 勞-場務遺失及損壞 / 勞-燈光費 / 勞-燈光遺失及損壞 /
+  勞-攝影費 / 勞-攝影遺失及損壞 / 勞-收音器材費 / 勞-收音遺失及損壞 /
+  勞-航拍器材費 / 勞-航拍遺失及損壞 /
+  勞-剪接製作費 / 勞-檔管物品購置 / 勞-特效素材費 / 勞-職工福利
 
-━━ 步驟 1C：費用子科目（expense_category）━━
-根據步驟 1B 選出的父科目，從對應子清單選一，填入**中文名稱**：
-
-  MEAL         → 餐飲費 / 誤餐費 / 飲用水
-  RENTAL       → 場地租金 / 辦公室租金 / 辦公室用品租金 / 車輛租金
-  TRANSPORTATION →
-    高鐵/台鐵/客運/遊覽車 / 計程車資 / 過路費 / 停車費 / 油資 / 罰單
-  UTILITY      → 水電瓦斯費 / 電信／網路費
-  ACCOMMODATION→ 住宿費
-  OFFICE_SUPPLY→ 文具用品 / 郵電費
-  PRODUCTION_SUPPLIES → 現場拍攝用品購買（預設，無法判斷時填此）
-  MISC         → 雜費（由審核者主動選擇）
-  LABOR        → 勞務費
-  PERFORMANCE  → 演出費 / 臨演演出費
-  ENTERTAINMENT→ 交際費
-  ART          → 置景材料耗材費 / 陳設材料耗材費 / 美術道具費 / 美術道具租金 / 劇本費
-  COSTUME      → 造型化妝費 / 特殊化妝費 / 服裝費 / 服裝租金
-  EQUIPMENT    → 場務器材費 / 場務遺失及損壞 / 燈光費 / 燈光遺失及損壞 /
-                  攝影費 / 攝影遺失及損壞 / 收音器材費 / 收音遺失及損壞 /
-                  航拍器材費 / 航拍遺失及損壞
-  POST_PROD    → 剪接製作費 / 特效素材費 / 檔管物品購置
-  HR_WELFARE   → 職工福利 / 保險費
-
-  **重要：若無法判斷子科目，expense_parent_category 填 PRODUCTION_SUPPLIES，expense_category 填「現場拍攝用品購買」**
+  **重要：若無法判斷，expense_category 填「勞-現場拍攝用品購買」**
 
 場景推理範例：
-  - 「店名含『中油、台塑石化、全國加油』→ 加油站 → voucher_category=RECEIPT, expense_parent_category=TRANSPORTATION, expense_category=油資」
-  - 「品項含飯、便當、套餐 → 餐廳 → expense_parent_category=MEAL, expense_category=餐飲費」
-  - 「版面含 Check-in/Check-out 日期與房號 → 飯店 → voucher_category=RECEIPT, expense_parent_category=ACCOMMODATION, expense_category=住宿費」
+  - 「店名含『中油、台塑石化、全國加油』→ 加油站 → voucher_category=RECEIPT, expense_category=勞-交通費-油資」
+  - 「品項含飯、便當、套餐 → 餐廳 → expense_category=勞-餐飲費」
+  - 「版面含 Check-in/Check-out 日期與房號 → 飯店 → voucher_category=RECEIPT, expense_category=勞-住宿費」
   - 「有買方統一編號已填入 → B2B 公司採購發票 → voucher_category=INVOICE」
-  - 「手寫金額＋身分證字號＋收款人簽章 → 勞報單 → voucher_category=LABOR_FORM, expense_parent_category=LABOR, expense_category=勞務費」
-  - 「台電格式帳單 + 用電度數 → voucher_category=RECEIPT, expense_parent_category=UTILITY, expense_category=水電瓦斯費」
-  - 「文具四件、A4 影印紙 → expense_parent_category=OFFICE_SUPPLY, expense_category=文具用品」
-  - 「五金行收據、商品名稱不明 → 無法確定部門 → expense_parent_category=PRODUCTION_SUPPLIES, expense_category=現場拍攝用品購買」
+  - 「手寫金額＋身分證字號＋收款人簽章 → 勞報單 → voucher_category=LABOR_FORM, expense_category=勞-勞務費」
+  - 「台電格式帳單 + 用電度數 → voucher_category=RECEIPT, expense_category=勞-水電瓦斯費」
+  - 「文具四件、A4 影印紙 → expense_category=勞-文具用品」
+  - 「五金行收據、商品名稱不明 → 無法確定部門 → expense_category=勞-現場拍攝用品購買」
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【步驟二：欄位萃取與合理性推論】

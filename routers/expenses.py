@@ -155,6 +155,7 @@ def export_expenses(
         # REPLACED_VOID 時退件原因欄改填 void_reason（沖銷原因）
         remark = (e.void_reason or e.reject_reason or "") if is_void else (e.reject_reason or "")
 
+        expense_cats: list[str] = json.loads(e.expense_categories or "[]")
         writer.writerow([
             e.serial_number,
             str(e.id),
@@ -169,6 +170,7 @@ def export_expenses(
                 VOUCHER_CATEGORY_ZH.get(c, c)
                 for c in json.loads(e.voucher_categories or "[]")
             ),
+            " / ".join(expense_cats),
             _fmt_amount(e.total_amount),
             _fmt_amount(e.net_amount),
             _fmt_amount(e.tax_amount),
