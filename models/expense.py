@@ -15,10 +15,8 @@ class ExpenseStatus(str, enum.Enum):
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
     NEEDS_MANUAL_REVIEW = "NEEDS_MANUAL_REVIEW"
-    SUPPLEMENTED = "SUPPLEMENTED"
-    WAITING_RETURN = "WAITING_RETURN"   # 待退貨：缺物品照片，尚未結清
-    COMPLETED = "COMPLETED"             # 已結清：物品照片已補齊
-    REPLACED_VOID = "REPLACED_VOID"     # 已作廢：被換單取代
+    WAITING_RETURN = "WAITING_RETURN"
+    REPLACED_VOID = "REPLACED_VOID"
 
 
 class Expense(Base):
@@ -120,6 +118,10 @@ class Expense(Base):
     referenced_invoice_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Dashboard 手動排序（數值越小越前面；null 表示未設定，排在最後）
     display_order: Mapped[int | None] = mapped_column(nullable=True)
+    # 已從待退貨管理移出（保留資料與 relation_type badge，僅隱藏於孤立補件清單）
+    dismissed_from_waiting_return: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="expenses")

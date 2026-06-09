@@ -57,20 +57,11 @@ def _classify_tax_type(voucher_category: str | None, voucher_subtype: str | None
         return "三聯式—一般稅額"
     if cat == "RECEIPT":
         return "二聯式/收據"
-    if cat == "TRANSPORTATION":
-        if sub == "FUEL":
-            return "油資—依法可扣"
-        return "交通票據"
-    if cat == "ACCOMMODATION":
-        return "住宿費"
-    if cat == "LABOR_SERVICE":
-        return "勞務費"
-    if cat == "UTILITY":
-        return "水電瓦斯費"
-    if cat == "RENTAL":
-        return "租金"
-    if cat == "INSURANCE":
-        return "保險費"
+    if cat == "LABOR_FORM":
+        return "勞保"
+    if cat == "CREDIT_NOTE":
+        return "折讓"
+    # DEPOSIT, RETURN, OTHER
     return "其他費用"
 
 
@@ -142,9 +133,10 @@ def export_expenses(
     writer = csv.writer(buf)
     writer.writerow(CSV_HEADERS)
     for e in items:
-        # REPLACED_VOID（換單/換新發票作廢舊單）與 CREDIT_NOTE（折讓扣減）均顯示負數
+        # REPLACED_VOID（舊資料）、VOID_ORIGINAL（換單原始單）、CREDIT_NOTE（折讓）均顯示負數
         is_void = (
             e.status == ExpenseStatus.REPLACED_VOID
+            or e.relation_type == "VOID_ORIGINAL"
             or e.relation_type == "CREDIT_NOTE"
         )
         sign = Decimal("-1") if is_void else Decimal("1")
@@ -190,6 +182,7 @@ def export_expenses(
             continue
         is_void_sum = (
             e.status == ExpenseStatus.REPLACED_VOID
+            or e.relation_type == "VOID_ORIGINAL"
             or e.relation_type == "CREDIT_NOTE"
         )
         amt = e.total_amount * (Decimal("-1") if is_void_sum else Decimal("1"))
@@ -229,7 +222,7 @@ def export_tax_report(
     date_to: date = Query(..., description="費用日期迄（YYYY-MM-DD，必填）"),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    """進項稅額明細表：以 expense_date 為基準篩選，僅含 APPROVED / COMPLETED，供申報營業稅使用。"""
+    """進項稅額明細表：以 expense_date 為基準篩選，僅含 APPROVED，供申報營業稅使用。"""
     from sqlalchemy import select as sa_select
     from models.expense import Expense as ExpenseModel, ExpenseStatus as ES
 
@@ -238,11 +231,7 @@ def export_tax_report(
         .where(
             ExpenseModel.expense_date >= date_from,
             ExpenseModel.expense_date <= date_to,
-            ExpenseModel.status.in_([
-                ES.APPROVED,
-                ES.COMPLETED,
-                ES.REPLACED_VOID,
-            ]),
+            ExpenseModel.status == ES.APPROVED,
         )
         .order_by(ExpenseModel.expense_date.asc(), ExpenseModel.serial_number.asc())
     )
@@ -254,7 +243,7 @@ def export_tax_report(
     writer.writerow(TAX_REPORT_HEADERS)
 
     for e in items:
-        is_void = e.status == ES.REPLACED_VOID
+        is_void = e.status == ES.REPLACED_VOID or e.relation_type == "VOID_ORIGINAL"
         sign = Decimal("-1") if is_void else Decimal("1")
 
         def _tax_fmt(val: Decimal | None, _s: Decimal = sign) -> str:
@@ -332,18 +321,18 @@ def list_waiting_returns(
         ).order_by(Expense.created_at.desc())
     ).all())
 
-    # Step 2：取所有尚未配對的退貨補件（三種情境，parent_id IS NULL）
+    # Step 2：取所有尚未配對的退貨補件（三種情境，parent_id IS NULL，未移出待退貨管理）
     supplements: list[Expense] = list(db.scalars(
         select(Expense).where(
             Expense.relation_type.in_(["VOID_REPLACE", "CREDIT_NOTE", "RETURN_SUPPLEMENT"]),
             Expense.parent_id.is_(None),
             Expense.is_active == True,
+            Expense.dismissed_from_waiting_return == False,
         ).order_by(Expense.created_at.desc())
     ).all())
 
-    # Step 2b：取所有已以 parent_id 明確配對的補件（含 COMPLETED）
-    # COMPLETED 補件若原始憑證仍為 WAITING_RETURN，仍需顯示於左側供確認；
-    # 若原始憑證已離開 WAITING_RETURN（如 PENDING），則在 Step 5b 中過濾掉。
+    # Step 2b：取所有已以 parent_id 明確配對的補件
+    # 原始憑證仍為 WAITING_RETURN 時顯示於左側；已離開 WAITING_RETURN 則在 Step 5b 過濾掉。
     all_paired_supplements: list[Expense] = list(db.scalars(
         select(Expense).where(
             Expense.relation_type.in_(["VOID_REPLACE", "CREDIT_NOTE", "RETURN_SUPPLEMENT"]),
@@ -396,19 +385,18 @@ def list_waiting_returns(
                 ExpenseWithImages.model_validate(sup).model_dump()
             )
         else:
-            # COMPLETED 補件已完成配對流程，不再顯示於孤立補件區
-            if sup.status != ExpenseStatus.COMPLETED:
-                sup_data = ExpenseWithImages.model_validate(sup).model_dump()
-                # 若補件有 referenced_invoice_number 但原始憑證尚在左側，標記建議配對
-                if sup.referenced_invoice_number:
-                    orig = invoice_by_number.get(sup.referenced_invoice_number)
-                    sup_data["suggested_match"] = (
-                        {"expense_id": str(orig.id), "serial_number": orig.serial_number}
-                        if orig else None
-                    )
-                else:
-                    sup_data["suggested_match"] = None
-                orphan_supplements.append(sup_data)
+            # 孤立補件：parent_id 未設定且未配對，一律顯示
+            sup_data = ExpenseWithImages.model_validate(sup).model_dump()
+            # 若補件有 referenced_invoice_number 但原始憑證尚在左側，標記建議配對
+            if sup.referenced_invoice_number:
+                orig = invoice_by_number.get(sup.referenced_invoice_number)
+                sup_data["suggested_match"] = (
+                    {"expense_id": str(orig.id), "serial_number": orig.serial_number}
+                    if orig else None
+                )
+            else:
+                sup_data["suggested_match"] = None
+            orphan_supplements.append(sup_data)
 
     # Step 5b：以 parent_id 明確配對的補件（pair_expense API 設定）
     # 若原始憑證不是 WAITING_RETURN（手動加入情境），動態載入並加入左側

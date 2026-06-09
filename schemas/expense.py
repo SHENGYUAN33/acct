@@ -61,6 +61,7 @@ class ExpenseRead(BaseModel):
     void_reason: str | None = None
     referenced_invoice_number: str | None = None
     possible_duplicate_of: uuid.UUID | None = None
+    dismissed_from_waiting_return: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -102,6 +103,7 @@ class ExpenseUpdate(BaseModel):
     is_active: bool | None = None
     void_reason: str | None = None
     referenced_invoice_number: str | None = None
+    dismissed_from_waiting_return: bool | None = None
 
 
 class ExpenseCreate(BaseModel):

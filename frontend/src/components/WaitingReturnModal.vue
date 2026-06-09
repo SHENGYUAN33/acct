@@ -1,96 +1,242 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { X, Loader2, PackageX, CheckCircle2, ChevronRight, ChevronDown, Search, Link2, Unlink2, Trash2, SlidersHorizontal } from 'lucide-vue-next'
-import { fetchWaitingReturns, fetchExpenses, fetchRelatedExpenses, updateExpense, deleteExpense, pairExpense } from '../api/expenseApi'
+import { X, Loader2, PackageX, CheckCircle2, ChevronRight, ChevronDown, Search, Link2, Unlink2, Trash2, SlidersHorizontal, Plus } from 'lucide-vue-next'
+import { getStatusConfig } from '../constants/status.js'
+import { getRelationTypeConfig, SUPPLEMENT_RELATION_TYPES, RELATION_TYPE_OPTIONS } from '../constants/relationType.js'
+import { fetchWaitingReturns, fetchExpenses, fetchRelatedExpenses, updateExpense, pairExpense } from '../api/expenseApi'
+import { fetchVoucherCategories } from '../api/configApi'
 import { toast } from 'vue3-toastify'
 import { secureImgUrl as imgUrl, isViewableImage } from '../utils/imageUrl'
+import { getVoucherLabel } from '../constants/voucher.js'
 
 const emit = defineEmits(['close', 'count-changed'])
 
-const VOUCHER_CATEGORY_LABEL = {
-  INVOICE: '電子發票', RECEIPT: '收據', TRANSPORTATION: '交通票據',
-  LABOR_SERVICE: '勞務服務', INSURANCE: '保險', RENTAL: '租金',
-  ACCOMMODATION: '住宿', UTILITY: '水電費', POSTAGE: '郵寄費用',
-}
-
-// ── 資料 ───────────────────────────────────────────────────────────
+// ── 資料
 const isLoading = ref(true)
 const cases = ref([])
 const orphanSupplements = ref([])
 
-// ── 左欄展開 ───────────────────────────────────────────────────────
+// ── 左欄展開
 const expandedInvoiceId = ref(null)
 
-// ── 右欄搜尋 ───────────────────────────────────────────────────────
-const searchQuery = ref('')
-const isSearching = ref(false)
-const searchResults = ref([])
-
-// ── 拖拉配對 ───────────────────────────────────────────────────────
+// ── 拖拉配對
 const draggingSupplementId = ref(null)
 const dragOverInvoiceId = ref(null)
-const pendingLink = ref(null)  // { supplementId, supplementSerial, invoiceId, invoiceSerial, invoiceNumber }
+const pendingLink = ref(null)
 const isLinking = ref(false)
 
-// ── 動作按鈕 ───────────────────────────────────────────────────────
+// ── 動作按鈕
 const unlinkingId = ref(null)
 const finalizingInvoiceId = ref(null)
+const removingCaseId = ref(null)
+const deletingOrphanId = ref(null)
 
-// ── 左欄：手動加入原始交易 ─────────────────────────────────────────
-const leftSearchQuery = ref('')
-const isLeftSearching = ref(false)
-const leftSearchResults = ref([])
-const showLeftSearch = ref(false)
-
-// ── 進階篩選：組別選項（動態從報帳資料載入）──────────────────────────
+// ── 進階篩選選項（動態載入）
 const availableDepts = ref([])
+const voucherCategoryOptions = ref([])
 
-// ── 左欄：進階多條件篩選（新增，獨立於原有單一搜尋）─────────────────
+// ── 工具：voucher_category 比對（相容 JSON 字串或陣列）
+function matchesVoucherCat(expense, category) {
+  if (!category) return true
+  const cats = Array.isArray(expense.voucher_categories)
+    ? expense.voucher_categories
+    : JSON.parse(expense.voucher_categories || '[]')
+  return cats.includes(category)
+}
+
+// ── 左欄：前端即時篩選
 const showLeftFilter = ref(false)
 const leftFilter = reactive({
   serial_number: '', invoice_number: '', uploader_name: '',
   uploader_dept: '', date_from: '', date_to: '',
   amount_min: '', amount_max: '', voucher_category: '',
 })
-const isLeftFilterSearching = ref(false)
-const leftFilterResults = ref([])
 const leftActiveCount = computed(() => Object.values(leftFilter).filter(v => v !== '').length)
 
-// ── 右欄：進階多條件篩選（新增，獨立於原有單一搜尋）─────────────────
+const filteredCases = computed(() => {
+  if (leftActiveCount.value === 0) return cases.value
+  return cases.value.filter(item => {
+    const inv = item.invoice
+    if (leftFilter.serial_number && !inv.serial_number?.includes(leftFilter.serial_number)) return false
+    if (leftFilter.invoice_number && !inv.invoice_number?.includes(leftFilter.invoice_number)) return false
+    if (leftFilter.uploader_name && !inv.uploader_name?.includes(leftFilter.uploader_name)) return false
+    if (leftFilter.uploader_dept && inv.uploader_dept !== leftFilter.uploader_dept) return false
+    if (leftFilter.date_from && inv.expense_date && inv.expense_date < leftFilter.date_from) return false
+    if (leftFilter.date_to && inv.expense_date && inv.expense_date > leftFilter.date_to) return false
+    if (leftFilter.amount_min !== '' && Number(inv.total_amount) < Number(leftFilter.amount_min)) return false
+    if (leftFilter.amount_max !== '' && Number(inv.total_amount) > Number(leftFilter.amount_max)) return false
+    if (leftFilter.voucher_category && !matchesVoucherCat(inv, leftFilter.voucher_category)) return false
+    return true
+  })
+})
+
+function clearLeftFilter() {
+  Object.keys(leftFilter).forEach(k => { leftFilter[k] = '' })
+}
+
+// ── 左欄：新增（搜尋 DB → 加入待退貨）
+const showLeftAdd = ref(false)
+const leftAddQuery = ref('')
+const isLeftAdding = ref(false)
+const leftAddResults = ref([])
+
+async function searchForLeftAdd() {
+  const q = leftAddQuery.value.trim()
+  if (!q) { leftAddResults.value = []; return }
+  isLeftAdding.value = true
+  try {
+    const res = await fetchExpenses({ q, page_size: 10 })
+    const existingIds = new Set(cases.value.map(c => c.invoice.id))
+    leftAddResults.value = (res.data?.data?.items ?? []).filter(e => !existingIds.has(e.id))
+  } catch {
+    toast.error('搜尋失敗')
+    leftAddResults.value = []
+  } finally {
+    isLeftAdding.value = false
+  }
+}
+
+async function addToLeftPanel(expense) {
+  if (expense.status !== 'WAITING_RETURN') {
+    try {
+      await updateExpense(expense.id, { status: 'WAITING_RETURN' })
+      expense = { ...expense, status: 'WAITING_RETURN' }
+    } catch {
+      toast.error('無法將該憑證標記為待退貨，請稍後再試')
+      return
+    }
+  }
+  let existingSupplements = []
+  try {
+    const res = await fetchRelatedExpenses(expense.id)
+    existingSupplements = (res.data?.data ?? [])
+      .filter(e => SUPPLEMENT_RELATION_TYPES.includes(e.relation_type))
+  } catch { }
+  cases.value = [{ invoice: expense, supplements: existingSupplements }, ...cases.value]
+  leftAddQuery.value = ''
+  leftAddResults.value = []
+  showLeftAdd.value = false
+  emit('count-changed')
+}
+
+// ── 左欄：移出待退貨（解除補件關聯，invoice 改回 PENDING）
+async function removeFromWaitingReturn(item) {
+  const invoice = item.invoice
+  if (removingCaseId.value === invoice.id) return
+  if (!confirm(`確定將 ${invoice.serial_number} 移出待退貨管理？\n已配對的補件將解除關聯，費用資料仍會保留。`)) return
+  removingCaseId.value = invoice.id
+  try {
+    const ops = []
+    for (const sup of (item.supplements ?? [])) {
+      ops.push(updateExpense(sup.id, { parent_id: null, referenced_invoice_number: null }))
+    }
+    ops.push(updateExpense(invoice.id, { status: 'PENDING', relation_type: null }))
+    await Promise.all(ops)
+    toast.success(`${invoice.serial_number} 已移出待退貨管理`)
+    await loadData()
+    emit('count-changed')
+  } catch {
+    toast.error('操作失敗，請稍後再試')
+  } finally {
+    removingCaseId.value = null
+  }
+}
+
+// ── 右欄：前端即時篩選
 const showRightFilter = ref(false)
 const rightFilter = reactive({
   serial_number: '', invoice_number: '', uploader_name: '',
   uploader_dept: '', date_from: '', date_to: '',
   amount_min: '', amount_max: '', voucher_category: '',
 })
-const isRightFilterSearching = ref(false)
-const rightFilterResults = ref([])
 const rightActiveCount = computed(() => Object.values(rightFilter).filter(v => v !== '').length)
 
-// ── 燈箱 ───────────────────────────────────────────────────────────
+const filteredOrphanSupplements = computed(() => {
+  if (rightActiveCount.value === 0) return orphanSupplements.value
+  return orphanSupplements.value.filter(sup => {
+    if (rightFilter.serial_number && !sup.serial_number?.includes(rightFilter.serial_number)) return false
+    if (rightFilter.invoice_number && !sup.invoice_number?.includes(rightFilter.invoice_number)) return false
+    if (rightFilter.uploader_name && !sup.uploader_name?.includes(rightFilter.uploader_name)) return false
+    if (rightFilter.uploader_dept && sup.uploader_dept !== rightFilter.uploader_dept) return false
+    if (rightFilter.date_from && sup.expense_date && sup.expense_date < rightFilter.date_from) return false
+    if (rightFilter.date_to && sup.expense_date && sup.expense_date > rightFilter.date_to) return false
+    if (rightFilter.amount_min !== '' && Number(sup.total_amount) < Number(rightFilter.amount_min)) return false
+    if (rightFilter.amount_max !== '' && Number(sup.total_amount) > Number(rightFilter.amount_max)) return false
+    if (rightFilter.voucher_category && !matchesVoucherCat(sup, rightFilter.voucher_category)) return false
+    return true
+  })
+})
+
+function clearRightFilter() {
+  Object.keys(rightFilter).forEach(k => { rightFilter[k] = '' })
+}
+
+// ── 右欄：新增（搜尋 DB → 自動判斷 relation_type → 加入補件池）
+const showRightAdd = ref(false)
+const rightAddQuery = ref('')
+const isRightAdding = ref(false)
+const rightAddResults = ref([])
+
+function autoDetectRelationType(expense) {
+  // 1. 已有明確的補件 relation_type → 直接沿用
+  if (expense.relation_type && SUPPLEMENT_RELATION_TYPES.includes(expense.relation_type)) {
+    return expense.relation_type
+  }
+  // 2. OCR 辨識到 voucher_category = CREDIT_NOTE → 折讓單（比關鍵字更可靠）
+  const cats = Array.isArray(expense.voucher_categories)
+    ? expense.voucher_categories
+    : JSON.parse(expense.voucher_categories || '[]')
+  if (cats.includes('CREDIT_NOTE')) return 'CREDIT_NOTE'
+  // 3. 說明文字格式或關鍵字
+  const desc = expense.user_description || ''
+  if (/(?:之前收據|補差額|差額補足|原單).*日期\s*[：:]\s*\d{4}-\d{2}-\d{2}.*金額\s*[：:]\s*\d/.test(desc)) return 'RETURN_SUPPLEMENT'
+  const descLower = desc.toLowerCase()
+  if (descLower.includes('換單') || descLower.includes('換發票')) return 'VOID_REPLACE'
+  if (descLower.includes('折讓')) return 'CREDIT_NOTE'
+  return 'RETURN_SUPPLEMENT'
+}
+
+async function searchForRightAdd() {
+  const q = rightAddQuery.value.trim()
+  if (!q) { rightAddResults.value = []; return }
+  isRightAdding.value = true
+  try {
+    const res = await fetchExpenses({ q, page_size: 10 })
+    const orphanIds = new Set(orphanSupplements.value.map(s => s.id))
+    const pairedIds = new Set(cases.value.flatMap(c => (c.supplements ?? []).map(s => s.id)))
+    const invoiceIds = new Set(cases.value.map(c => c.invoice.id))
+    rightAddResults.value = (res.data?.data?.items ?? []).filter(e =>
+      !orphanIds.has(e.id) && !pairedIds.has(e.id) && !invoiceIds.has(e.id)
+    )
+  } catch {
+    toast.error('搜尋失敗')
+    rightAddResults.value = []
+  } finally {
+    isRightAdding.value = false
+  }
+}
+
+async function addToRightPanel(expense) {
+  const relationType = autoDetectRelationType(expense)
+  try {
+    await updateExpense(expense.id, { relation_type: relationType, dismissed_from_waiting_return: false })
+    rightAddQuery.value = ''
+    rightAddResults.value = []
+    showRightAdd.value = false
+    toast.success(`${expense.serial_number} 已加入補件池（${relationTypeLabel(relationType)}）`)
+    await loadData()
+    emit('count-changed')
+  } catch {
+    toast.error('加入失敗，請稍後再試')
+  }
+}
+
+// ── 燈箱
 const lightboxUrl = ref(null)
 function openLightbox(url) { lightboxUrl.value = url }
 function closeLightbox() { lightboxUrl.value = null }
 
-const STATUS_LABEL = {
-  PENDING: '待審核', APPROVED: '已核准', REJECTED: '已退回',
-  NEEDS_MANUAL_REVIEW: '需人工審核', SUPPLEMENTED: '已補件',
-  REPLACED_VOID: '已作廢', WAITING_RETURN: '待退貨', COMPLETED: '已結清',
-}
-const STATUS_DOT = {
-  PENDING: 'bg-yellow-400', APPROVED: 'bg-green-500', REJECTED: 'bg-red-500',
-  NEEDS_MANUAL_REVIEW: 'bg-orange-400', SUPPLEMENTED: 'bg-blue-400',
-  REPLACED_VOID: 'bg-gray-400', WAITING_RETURN: 'bg-purple-500', COMPLETED: 'bg-teal-500',
-}
-
-// ── 右欄顯示（進階篩選結果 > 簡易搜尋結果 > 孤立補件）──────────────
-const rightPanelItems = computed(() => {
-  if (rightActiveCount.value > 0 && rightFilterResults.value.length > 0) return rightFilterResults.value
-  if (searchQuery.value.trim() && searchResults.value.length > 0) return searchResults.value
-  return orphanSupplements.value
-})
-
-// ── 載入 ───────────────────────────────────────────────────────────
+// ── 載入
 async function loadData() {
   isLoading.value = true
   try {
@@ -108,46 +254,29 @@ async function loadData() {
 }
 onMounted(loadData)
 
-// ── 載入組別選項（Modal 開啟時從現有報帳資料萃取去重）────────────────
 async function loadAvailableDepts() {
   try {
     const res = await fetchExpenses({ page_size: 200 })
     const items = res.data?.data?.items ?? []
-    const depts = [...new Set(items.map(e => e.uploader_dept).filter(Boolean))].sort()
-    availableDepts.value = depts
-  } catch { /* 靜默失敗，組別下拉維持空陣列 */ }
+    availableDepts.value = [...new Set(items.map(e => e.uploader_dept).filter(Boolean))].sort()
+  } catch { }
 }
 onMounted(loadAvailableDepts)
 
-// ── 左欄：手風琴展開 ───────────────────────────────────────────────
+async function loadVoucherCategories() {
+  try {
+    const res = await fetchVoucherCategories()
+    voucherCategoryOptions.value = res.data?.data?.voucher_categories ?? []
+  } catch { }
+}
+onMounted(loadVoucherCategories)
+
+// ── 左欄手風琴
 function toggleExpand(invoiceId) {
   expandedInvoiceId.value = expandedInvoiceId.value === invoiceId ? null : invoiceId
 }
 
-// ── 右欄：名稱搜尋 ─────────────────────────────────────────────────
-async function searchSupplements() {
-  const q = searchQuery.value.trim()
-  if (!q) { searchResults.value = []; return }
-  isSearching.value = true
-  try {
-    // Bug 7：提高 page_size 上限，確保搜尋結果涵蓋所有補件類型
-    const res = await fetchExpenses({ q, page_size: 100 })
-    searchResults.value = (res.data?.data?.items ?? [])
-      .filter(e => ['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE'].includes(e.relation_type))
-  } catch {
-    toast.error('搜尋失敗')
-    searchResults.value = []
-  } finally {
-    isSearching.value = false
-  }
-}
-
-function clearSearch() {
-  searchQuery.value = ''
-  searchResults.value = []
-}
-
-// ── 拖拉：開始（從右欄補件卡片）────────────────────────────────────
+// ── 拖拉
 function onDragStart(event, supplement) {
   draggingSupplementId.value = supplement.id
   event.dataTransfer.effectAllowed = 'link'
@@ -159,7 +288,6 @@ function onDragEnd() {
   dragOverInvoiceId.value = null
 }
 
-// ── 拖拉：Drop 至左欄憑證行 ────────────────────────────────────────
 function onDragOver(event, invoiceId) {
   if (!draggingSupplementId.value) return
   event.preventDefault()
@@ -176,11 +304,7 @@ function onDragLeave(event) {
 function onDrop(event, invoice) {
   event.preventDefault()
   if (!draggingSupplementId.value) { dragOverInvoiceId.value = null; return }
-
-  // 找被拖拉的補件
-  const all = [...rightPanelItems.value, ...orphanSupplements.value]
-  const supplement = all.find(s => s.id === draggingSupplementId.value)
-
+  const supplement = orphanSupplements.value.find(s => s.id === draggingSupplementId.value)
   pendingLink.value = {
     supplementId: draggingSupplementId.value,
     supplementSerial: supplement?.serial_number ?? '（未知）',
@@ -192,7 +316,7 @@ function onDrop(event, invoice) {
   dragOverInvoiceId.value = null
 }
 
-// ── 確認配對（pair endpoint 設定 parent_id 與 referenced_invoice_number）──
+// ── 確認配對
 async function confirmLink() {
   const { supplementId, invoiceId } = pendingLink.value
   pendingLink.value = null
@@ -209,7 +333,7 @@ async function confirmLink() {
   }
 }
 
-// ── 一鍵確認建議配對 ────────────────────────────────────────────────
+// ── 一鍵建議配對
 async function confirmSuggestedMatch(sup) {
   if (!sup.suggested_match) return
   isLinking.value = true
@@ -225,121 +349,12 @@ async function confirmSuggestedMatch(sup) {
   }
 }
 
-// ── 情境類型標籤 ────────────────────────────────────────────────────
+// ── 情境類型標籤（從 SSOT 取得）
 function relationTypeLabel(type) {
-  if (type === 'VOID_REPLACE') return '換新發票'
-  if (type === 'CREDIT_NOTE') return '折讓單'
-  if (type === 'RETURN_SUPPLEMENT') return '換貨收據'
-  return ''
+  return getRelationTypeConfig(type)?.label ?? ''
 }
 
-// ── 左欄：搜尋原始交易 ─────────────────────────────────────────────
-async function searchLeftPanel() {
-  const q = leftSearchQuery.value.trim()
-  if (!q) { leftSearchResults.value = []; return }
-  isLeftSearching.value = true
-  try {
-    const res = await fetchExpenses({ q, page_size: 20 })
-    const existingIds = new Set(cases.value.map(c => c.invoice.id))
-    leftSearchResults.value = (res.data?.data?.items ?? []).filter(e => !existingIds.has(e.id))
-  } catch {
-    toast.error('搜尋失敗')
-    leftSearchResults.value = []
-  } finally {
-    isLeftSearching.value = false
-  }
-}
-
-async function addToLeftPanel(expense) {
-  // 1. 將憑證狀態設為 WAITING_RETURN，確保 loadData() 重建後仍顯示於左側
-  if (expense.status !== 'WAITING_RETURN') {
-    try {
-      await updateExpense(expense.id, { status: 'WAITING_RETURN' })
-      expense = { ...expense, status: 'WAITING_RETURN' }
-    } catch {
-      toast.error('無法將該憑證標記為待退貨，請稍後再試')
-      return
-    }
-  }
-  // 2. 查詢已存在的補件（parent_id 指向此憑證）
-  let existingSupplements = []
-  try {
-    const res = await fetchRelatedExpenses(expense.id)
-    existingSupplements = (res.data?.data ?? [])
-      .filter(e => ['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE'].includes(e.relation_type))
-  } catch { /* 靜默失敗，顯示空補件 */ }
-  cases.value = [{ invoice: expense, supplements: existingSupplements }, ...cases.value]
-  leftSearchQuery.value = ''
-  leftSearchResults.value = []
-  showLeftSearch.value = false
-  emit('count-changed')
-}
-
-// ── 左欄：進階多條件篩選搜尋（新增，原有 searchLeftPanel 保留不動）───
-async function searchLeftPanelAdvanced() {
-  if (leftActiveCount.value === 0) { leftFilterResults.value = []; return }
-  isLeftFilterSearching.value = true
-  try {
-    const params = { page_size: 50 }
-    if (leftFilter.serial_number) params.serial_number_q = leftFilter.serial_number
-    if (leftFilter.invoice_number) params.invoice_number_q = leftFilter.invoice_number
-    if (leftFilter.uploader_name) params.uploader_name_q = leftFilter.uploader_name
-    if (leftFilter.uploader_dept) params.uploader_dept_q = leftFilter.uploader_dept
-    if (leftFilter.date_from) params.date_from = leftFilter.date_from
-    if (leftFilter.date_to) params.date_to = leftFilter.date_to
-    if (leftFilter.amount_min !== '') params.amount_min = leftFilter.amount_min
-    if (leftFilter.amount_max !== '') params.amount_max = leftFilter.amount_max
-    if (leftFilter.voucher_category) params.voucher_category_q = leftFilter.voucher_category
-    const res = await fetchExpenses(params)
-    const existingIds = new Set(cases.value.map(c => c.invoice.id))
-    leftFilterResults.value = (res.data?.data?.items ?? []).filter(e => !existingIds.has(e.id))
-  } catch {
-    toast.error('篩選搜尋失敗')
-    leftFilterResults.value = []
-  } finally {
-    isLeftFilterSearching.value = false
-  }
-}
-
-function clearLeftFilter() {
-  Object.keys(leftFilter).forEach(k => { leftFilter[k] = '' })
-  leftFilterResults.value = []
-}
-
-// ── 右欄：進階多條件篩選搜尋（新增，原有 searchSupplements 保留不動）─
-async function searchSupplementsAdvanced() {
-  if (rightActiveCount.value === 0) { rightFilterResults.value = []; return }
-  isRightFilterSearching.value = true
-  try {
-    const params = { page_size: 100 }
-    if (rightFilter.serial_number) params.serial_number_q = rightFilter.serial_number
-    if (rightFilter.invoice_number) params.invoice_number_q = rightFilter.invoice_number
-    if (rightFilter.uploader_name) params.uploader_name_q = rightFilter.uploader_name
-    if (rightFilter.uploader_dept) params.uploader_dept_q = rightFilter.uploader_dept
-    if (rightFilter.date_from) params.date_from = rightFilter.date_from
-    if (rightFilter.date_to) params.date_to = rightFilter.date_to
-    if (rightFilter.amount_min !== '') params.amount_min = rightFilter.amount_min
-    if (rightFilter.amount_max !== '') params.amount_max = rightFilter.amount_max
-    if (rightFilter.voucher_category) params.voucher_category_q = rightFilter.voucher_category
-    const res = await fetchExpenses(params)
-    rightFilterResults.value = (res.data?.data?.items ?? [])
-      .filter(e => ['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE'].includes(e.relation_type))
-  } catch {
-    toast.error('篩選搜尋失敗')
-    rightFilterResults.value = []
-  } finally {
-    isRightFilterSearching.value = false
-  }
-}
-
-function clearRightFilter() {
-  Object.keys(rightFilter).forEach(k => { rightFilter[k] = '' })
-  rightFilterResults.value = []
-}
-
-// ── 案件層級確認完成：所有補件 → PENDING，憑證依補件類型決定狀態 ──────
-// VOID_REPLACE：原始憑證 → REPLACED_VOID（作廢，CSV 匯出顯示負數）
-// 其他補件類型：原始憑證 → PENDING（回到待審核）
+// ── 案件確認完成
 async function finalizeCase(item) {
   const invoice = item.invoice
   if (finalizingInvoiceId.value === invoice.id) return
@@ -352,12 +367,12 @@ async function finalizeCase(item) {
       if (sup.status !== 'PENDING') ops.push(updateExpense(sup.id, { status: 'PENDING' }))
     }
     if (hasVoidReplace) {
-      ops.push(updateExpense(invoice.id, { status: 'REPLACED_VOID' }))
+      ops.push(updateExpense(invoice.id, { status: 'PENDING', relation_type: 'VOID_ORIGINAL' }))
     } else {
       ops.push(updateExpense(invoice.id, { status: 'PENDING' }))
     }
     await Promise.all(ops)
-    toast.success(hasVoidReplace ? '換單完成，原始憑證已作廢' : '案件已完成，憑證移至待審核')
+    toast.success(hasVoidReplace ? '換單完成，原始憑證已標記為沖銷' : '案件已完成，憑證移至待審核')
     await loadData()
     emit('count-changed')
   } catch {
@@ -367,52 +382,38 @@ async function finalizeCase(item) {
   }
 }
 
-// ── 刪除孤立補件 ───────────────────────────────────────────────────
-const deletingOrphanId = ref(null)
+// ── 移出孤立補件
 async function deleteOrphanSupplement(sup) {
   if (deletingOrphanId.value === sup.id) return
-  if (!confirm(`確定刪除孤立補件 ${sup.serial_number}？此操作無法復原。`)) return
+  if (!confirm(`確定將 ${sup.serial_number} 移出待退貨管理？\n費用資料仍會保留，在主頁面可繼續查看。`)) return
   deletingOrphanId.value = sup.id
   try {
-    // 先解除所有以此補件為 parent 的關聯，否則後端 child_supplements 檢查會阻擋刪除
-    const relatedRes = await fetchRelatedExpenses(sup.id)
-    const children = relatedRes.data?.data ?? []
-    if (children.length) {
-      await Promise.all(children.map(c => updateExpense(c.id, { parent_id: null })))
-    }
-    await deleteExpense(sup.id)
-    toast.success(`孤立補件 ${sup.serial_number} 已刪除`)
+    await updateExpense(sup.id, { dismissed_from_waiting_return: true })
+    toast.success(`${sup.serial_number} 已移出待退貨管理`)
     await loadData()
     emit('count-changed')
   } catch (err) {
-    toast.error(err?.response?.data?.detail || '刪除失敗，請稍後再試')
+    toast.error(err?.response?.data?.detail || '操作失敗，請稍後再試')
   } finally {
     deletingOrphanId.value = null
   }
 }
 
-// ── 解除配對 ───────────────────────────────────────────────────────
+// ── 解除配對
 async function unlinkSupplement(supplement, invoice) {
   if (unlinkingId.value === supplement.id) return
   unlinkingId.value = supplement.id
   try {
     const ops = [
-      updateExpense(supplement.id, {
-        parent_id: null,
-        referenced_invoice_number: null,
-      }),
+      updateExpense(supplement.id, { parent_id: null, referenced_invoice_number: null }),
     ]
-    // 解除配對時還原原始憑證為 WAITING_RETURN
-    if (invoice && (invoice.status === 'PENDING' || invoice.status === 'REPLACED_VOID')) {
-      ops.push(updateExpense(invoice.id, { status: 'WAITING_RETURN' }))
+    // 解除配對後，原始憑證回到待退貨（WAITING_RETURN）並清除沖銷標記
+    if (invoice) {
+      ops.push(updateExpense(invoice.id, { status: 'WAITING_RETURN', relation_type: null }))
     }
     await Promise.all(ops)
     toast.success(`補件 ${supplement.serial_number} 已解除配對`)
     await loadData()
-    // 手動加入的原始憑證（非 WAITING_RETURN）不在後端查詢範圍內，loadData 後補回左側
-    if (invoice && !cases.value.some(c => c.invoice.id === invoice.id)) {
-      cases.value = [{ invoice, supplements: [] }, ...cases.value]
-    }
     emit('count-changed')
   } catch {
     toast.error('解除配對失敗')
@@ -431,7 +432,10 @@ async function unlinkSupplement(supplement, invoice) {
         <div class="flex items-center gap-2">
           <PackageX :size="17" class="text-purple-500" />
           <span class="font-semibold text-gray-900 tracking-tight">待退貨管理</span>
-          <span v-if="!isLoading" class="text-xs text-gray-400 ml-1">{{ cases.length }} 筆待退貨案件</span>
+          <span v-if="!isLoading" class="text-xs text-gray-400 ml-1">
+            {{ cases.length }} 筆待退貨案件
+            <span v-if="leftActiveCount > 0" class="text-purple-500">（顯示 {{ filteredCases.length }} 筆）</span>
+          </span>
         </div>
         <button @click="emit('close')" class="text-gray-300 hover:text-gray-600 transition-colors">
           <X :size="20" />
@@ -450,13 +454,13 @@ async function unlinkSupplement(supplement, invoice) {
         <!-- ── 左欄：待退貨憑證清單 ── -->
         <div class="w-[58%] border-r border-gray-100 flex flex-col min-h-0">
 
-          <!-- 進階多條件篩選（Popover Pattern） -->
+          <!-- Toolbar: 篩選 + 新增 -->
           <div class="shrink-0 px-3 py-2 border-b border-gray-100 relative">
-
-            <!-- Toolbar: 篩選按鈕 + active chips -->
             <div class="flex items-center gap-1.5 flex-wrap min-h-[28px]">
+
+              <!-- 篩選按鈕 -->
               <button
-                @click="showLeftFilter = !showLeftFilter"
+                @click="showLeftFilter = !showLeftFilter; showLeftAdd = false"
                 class="flex items-center gap-1 px-2 py-1 text-xs border rounded-lg transition-colors shrink-0"
                 :class="showLeftFilter || leftActiveCount > 0
                   ? 'border-purple-300 bg-purple-50 text-purple-600'
@@ -470,62 +474,71 @@ async function unlinkSupplement(supplement, invoice) {
                 </span>
               </button>
 
+              <!-- 新增按鈕 -->
+              <button
+                @click="showLeftAdd = !showLeftAdd; showLeftFilter = false"
+                class="flex items-center gap-1 px-2 py-1 text-xs border rounded-lg transition-colors shrink-0"
+                :class="showLeftAdd
+                  ? 'border-teal-300 bg-teal-50 text-teal-600'
+                  : 'border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600'"
+              >
+                <Plus :size="11" />
+                <span>新增</span>
+              </button>
+
+              <!-- Active filter chips -->
               <span v-if="leftFilter.serial_number"
                 class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
                 EXP: {{ leftFilter.serial_number }}
-                <button @click="leftFilter.serial_number = ''; searchLeftPanelAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+                <button @click="leftFilter.serial_number = ''" class="ml-0.5 hover:text-purple-900">×</button>
               </span>
               <span v-if="leftFilter.invoice_number"
                 class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
                 發票: {{ leftFilter.invoice_number }}
-                <button @click="leftFilter.invoice_number = ''; searchLeftPanelAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+                <button @click="leftFilter.invoice_number = ''" class="ml-0.5 hover:text-purple-900">×</button>
               </span>
               <span v-if="leftFilter.uploader_name"
                 class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
                 {{ leftFilter.uploader_name }}
-                <button @click="leftFilter.uploader_name = ''; searchLeftPanelAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+                <button @click="leftFilter.uploader_name = ''" class="ml-0.5 hover:text-purple-900">×</button>
               </span>
               <span v-if="leftFilter.uploader_dept"
                 class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
                 {{ leftFilter.uploader_dept }}
-                <button @click="leftFilter.uploader_dept = ''; searchLeftPanelAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+                <button @click="leftFilter.uploader_dept = ''" class="ml-0.5 hover:text-purple-900">×</button>
               </span>
               <span v-if="leftFilter.date_from || leftFilter.date_to"
                 class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
                 {{ leftFilter.date_from || '起' }} ～ {{ leftFilter.date_to || '今' }}
-                <button @click="leftFilter.date_from = ''; leftFilter.date_to = ''; searchLeftPanelAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+                <button @click="leftFilter.date_from = ''; leftFilter.date_to = ''" class="ml-0.5 hover:text-purple-900">×</button>
               </span>
               <span v-if="leftFilter.amount_min !== '' || leftFilter.amount_max !== ''"
                 class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
                 NT${{ leftFilter.amount_min || '0' }}～{{ leftFilter.amount_max || '∞' }}
-                <button @click="leftFilter.amount_min = ''; leftFilter.amount_max = ''; searchLeftPanelAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+                <button @click="leftFilter.amount_min = ''; leftFilter.amount_max = ''" class="ml-0.5 hover:text-purple-900">×</button>
               </span>
               <span v-if="leftFilter.voucher_category"
                 class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
-                {{ VOUCHER_CATEGORY_LABEL[leftFilter.voucher_category] ?? leftFilter.voucher_category }}
-                <button @click="leftFilter.voucher_category = ''; searchLeftPanelAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+                {{ getVoucherLabel(leftFilter.voucher_category) }}
+                <button @click="leftFilter.voucher_category = ''" class="ml-0.5 hover:text-purple-900">×</button>
               </span>
-
               <button v-if="leftActiveCount > 0" @click="clearLeftFilter"
                 class="text-[10px] text-gray-400 hover:text-gray-600 ml-auto shrink-0">
                 清除全部
               </button>
             </div>
 
-            <!-- Popover panel -->
+            <!-- 左欄篩選 Popover（即時過濾，無需套用按鈕） -->
             <div v-if="showLeftFilter"
               class="absolute left-0 top-full mt-1 z-30 w-72 bg-white border border-gray-200 rounded-xl shadow-xl p-3 space-y-1.5">
               <div class="grid grid-cols-2 gap-1">
-                <input v-model="leftFilter.serial_number" @keyup.enter="searchLeftPanelAdvanced"
-                  placeholder="EXP編號"
+                <input v-model="leftFilter.serial_number" placeholder="EXP編號"
                   class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
-                <input v-model="leftFilter.invoice_number" @keyup.enter="searchLeftPanelAdvanced"
-                  placeholder="發票號碼"
+                <input v-model="leftFilter.invoice_number" placeholder="發票號碼"
                   class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
               </div>
               <div class="grid grid-cols-2 gap-1">
-                <input v-model="leftFilter.uploader_name" @keyup.enter="searchLeftPanelAdvanced"
-                  placeholder="上傳者姓名"
+                <input v-model="leftFilter.uploader_name" placeholder="上傳者姓名"
                   class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
                 <select v-model="leftFilter.uploader_dept"
                   class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400 bg-white">
@@ -551,23 +564,12 @@ async function unlinkSupplement(supplement, invoice) {
               <select v-model="leftFilter.voucher_category"
                 class="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400 bg-white">
                 <option value="">全部憑證類別</option>
-                <option value="INVOICE">電子發票</option>
-                <option value="RECEIPT">收據</option>
-                <option value="TRANSPORTATION">交通票據</option>
-                <option value="LABOR_SERVICE">勞務服務</option>
-                <option value="INSURANCE">保險</option>
-                <option value="RENTAL">租金</option>
-                <option value="ACCOMMODATION">住宿</option>
-                <option value="UTILITY">水電費</option>
-                <option value="POSTAGE">郵寄費用</option>
+                <option v-for="cat in voucherCategoryOptions" :key="cat.key" :value="cat.key">{{ cat.label }}</option>
               </select>
               <div class="flex gap-1 pt-0.5">
-                <button @click="searchLeftPanelAdvanced(); showLeftFilter = false"
-                  :disabled="isLeftFilterSearching || leftActiveCount === 0"
-                  class="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 bg-purple-500 hover:bg-purple-600 text-white text-xs rounded-lg disabled:opacity-50 transition-colors">
-                  <Loader2 v-if="isLeftFilterSearching" :size="11" class="animate-spin" />
-                  <Search v-else :size="11" />
-                  {{ isLeftFilterSearching ? '搜尋中...' : '套用篩選' }}
+                <button @click="showLeftFilter = false"
+                  class="flex-1 px-2.5 py-1.5 bg-purple-500 hover:bg-purple-600 text-white text-xs rounded-lg transition-colors">
+                  套用
                 </button>
                 <button @click="clearLeftFilter(); showLeftFilter = false"
                   class="px-2.5 py-1.5 border border-gray-200 text-gray-400 hover:text-gray-600 text-xs rounded-lg transition-colors">
@@ -576,282 +578,321 @@ async function unlinkSupplement(supplement, invoice) {
               </div>
             </div>
 
-            <!-- 篩選結果列表 -->
-            <div v-if="leftFilterResults.length"
-              class="mt-1.5 bg-white border border-gray-200 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
-              <div v-for="exp in leftFilterResults" :key="exp.id"
-                @click="addToLeftPanel(exp)"
-                class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-purple-50 border-b border-gray-100 last:border-0">
-                <span class="font-mono text-[11px] text-gray-800">{{ exp.serial_number }}</span>
-                <span v-if="exp.invoice_number" class="text-[10px] font-mono text-gray-400">{{ exp.invoice_number }}</span>
-                <span class="text-[10px] text-gray-500 truncate">{{ exp.uploader_name }}</span>
-                <span v-if="exp.total_amount != null" class="text-[10px] text-gray-500 shrink-0">
-                  NT${{ Number(exp.total_amount).toLocaleString() }}
-                </span>
-                <span class="ml-auto text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded shrink-0">加入</span>
+            <!-- 左欄新增 Panel -->
+            <div v-if="showLeftAdd" class="mt-1.5">
+              <div class="flex gap-1">
+                <input
+                  v-model="leftAddQuery"
+                  @keyup.enter="searchForLeftAdd"
+                  placeholder="輸入案件編號或關鍵字..."
+                  class="flex-1 text-xs px-2.5 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-teal-400"
+                />
+                <button @click="searchForLeftAdd" :disabled="isLeftAdding"
+                  class="flex items-center gap-1 px-2.5 py-1.5 bg-teal-500 hover:bg-teal-600 text-white text-xs rounded-lg disabled:opacity-50 transition-colors shrink-0">
+                  <Loader2 v-if="isLeftAdding" :size="11" class="animate-spin" />
+                  <Search v-else :size="11" />
+                </button>
               </div>
+              <div v-if="leftAddResults.length"
+                class="mt-1 bg-white border border-gray-200 rounded-lg overflow-hidden max-h-36 overflow-y-auto">
+                <div v-for="exp in leftAddResults" :key="exp.id"
+                  @click="addToLeftPanel(exp)"
+                  class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-teal-50 border-b border-gray-100 last:border-0">
+                  <span class="font-mono text-[11px] text-gray-800">{{ exp.serial_number }}</span>
+                  <span v-if="exp.invoice_number" class="text-[10px] font-mono text-gray-400">{{ exp.invoice_number }}</span>
+                  <span class="text-[10px] text-gray-500 truncate">{{ exp.uploader_name }}</span>
+                  <span v-if="exp.total_amount != null" class="text-[10px] text-gray-500 shrink-0">
+                    NT${{ Number(exp.total_amount).toLocaleString() }}
+                  </span>
+                  <span class="ml-auto text-[10px] bg-teal-100 text-teal-600 px-1.5 py-0.5 rounded shrink-0">加入</span>
+                </div>
+              </div>
+              <p v-else-if="leftAddQuery && !isLeftAdding" class="text-[10px] text-gray-400 text-center py-1.5">
+                未找到符合的費用
+              </p>
             </div>
-            <p v-if="leftActiveCount > 0 && leftFilterResults.length === 0 && !isLeftFilterSearching && !showLeftFilter"
-              class="text-[10px] text-gray-400 text-center py-1">點擊「套用篩選」執行搜尋</p>
           </div>
 
           <div class="flex-1 overflow-y-auto">
-
-            <!-- 左欄無案件空狀態 -->
-            <div v-if="cases.length === 0"
+            <!-- 空狀態 -->
+            <div v-if="filteredCases.length === 0"
               class="flex flex-col items-center justify-center h-full text-gray-300 text-xs gap-2 pb-8">
               <PackageX :size="32" class="opacity-30" />
-              <span class="text-gray-400 text-sm font-medium">目前無待退貨案件</span>
-              <span class="text-gray-300">備註含「待退貨」的報帳會顯示於此</span>
+              <span v-if="leftActiveCount > 0" class="text-gray-400 text-sm font-medium">無符合篩選條件的案件</span>
+              <span v-else class="text-gray-400 text-sm font-medium">目前無待退貨案件</span>
+              <span v-if="leftActiveCount === 0" class="text-gray-300">備註含「待退貨」的報帳會顯示於此</span>
             </div>
 
-          <div class="divide-y divide-gray-100">
-            <div
-              v-for="(item, idx) in cases"
-              :key="item.invoice.id"
-              class="transition-colors"
-              :class="dragOverInvoiceId === item.invoice.id ? 'bg-purple-50' : ''"
-              @dragover="onDragOver($event, item.invoice.id)"
-              @dragleave="onDragLeave"
-              @drop="onDrop($event, item.invoice)"
-            >
-              <!-- 憑證列標題 -->
+            <div class="divide-y divide-gray-100">
               <div
-                class="flex items-center gap-2 px-4 py-3 cursor-pointer hover:bg-gray-50 select-none"
-                @click="toggleExpand(item.invoice.id)"
+                v-for="item in filteredCases"
+                :key="item.invoice.id"
+                class="transition-colors"
+                :class="dragOverInvoiceId === item.invoice.id ? 'bg-purple-50' : ''"
+                @dragover="onDragOver($event, item.invoice.id)"
+                @dragleave="onDragLeave"
+                @drop="onDrop($event, item.invoice)"
               >
-                <!-- 展開箭頭 -->
-                <component
-                  :is="expandedInvoiceId === item.invoice.id ? ChevronDown : ChevronRight"
-                  :size="15"
-                  class="text-gray-400 shrink-0"
-                />
-
-                <!-- 狀態點 -->
-                <span class="w-2 h-2 rounded-full shrink-0"
-                  :class="STATUS_DOT[item.invoice.status] ?? 'bg-gray-300'" />
-
-                <!-- 案件編號 -->
-                <span class="font-mono text-xs font-semibold text-gray-800">{{ item.invoice.serial_number }}</span>
-
-                <!-- 金額 -->
-                <span v-if="item.invoice.total_amount != null" class="text-xs text-gray-500">
-                  NT${{ Number(item.invoice.total_amount).toLocaleString() }}
-                </span>
-
-                <!-- 發票號 -->
-                <span v-if="item.invoice.invoice_number" class="text-[11px] font-mono text-gray-400 truncate">
-                  {{ item.invoice.invoice_number }}
-                </span>
-
-                <!-- 右側 badge -->
-                <div class="ml-auto flex items-center gap-1.5 shrink-0">
-                  <!-- 補件狀態 badge -->
-                  <span v-if="item.supplements?.length > 0"
-                    class="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded">
-                    已配對{{ item.supplements.length > 1 ? ` (${item.supplements.length})` : '' }}
-                  </span>
-                  <span v-else
-                    class="text-[10px] bg-orange-100 text-orange-500 px-1.5 py-0.5 rounded">待配對</span>
-
-                  <!-- Drop 指示（拖拉中） -->
-                  <span v-if="dragOverInvoiceId === item.invoice.id"
-                    class="text-[10px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded animate-pulse">
-                    放開以配對
-                  </span>
-                </div>
-              </div>
-
-              <!-- 展開區：補件圖片 + 按鈕 -->
-              <div v-if="expandedInvoiceId === item.invoice.id" class="px-4 pb-4 space-y-3">
-
-                <!-- 原始憑證照片 -->
-                <div>
-                  <p class="text-[10px] text-gray-400 mb-1.5 font-medium">原始憑證照片</p>
-                  <div class="flex flex-wrap gap-2">
-                    <img
-                      v-for="(url, i) in (item.invoice.image_url ?? [])"
-                      :key="'inv-img-'+i"
-                      :src="imgUrl(url)"
-                      alt="憑證照片"
-                      @click="openLightbox(imgUrl(url))"
-                      class="w-14 h-14 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:opacity-80 transition-opacity"
-                    />
-                    <span v-if="!(item.invoice.image_url?.length)" class="text-xs text-gray-300 italic py-2">（無原始照片）</span>
-                  </div>
-                </div>
-
-                <!-- 已配對的補件（多筆 v-for） -->
+                <!-- 憑證列標題 -->
                 <div
-                  v-for="sup in (item.supplements ?? [])"
-                  :key="sup.id"
-                  class="bg-gray-50 rounded-xl border border-gray-200 p-3 space-y-2"
+                  class="flex items-center gap-2 px-4 py-3 cursor-pointer hover:bg-gray-50 select-none"
+                  @click="toggleExpand(item.invoice.id)"
                 >
-                  <div class="flex items-center gap-1.5">
-                    <span class="w-1.5 h-1.5 rounded-full shrink-0"
-                      :class="STATUS_DOT[sup.status] ?? 'bg-gray-300'" />
-                    <span class="font-mono text-[11px] text-gray-600">{{ sup.serial_number }}</span>
-                    <span class="text-[10px] text-gray-400">{{ sup.uploader_name }}</span>
-                  </div>
-
-                  <!-- 補件圖片（image_url = 費用憑證照，item_image_url = 退貨物品照） -->
-                  <div class="flex flex-wrap gap-2">
-                    <img
-                      v-for="(url, i) in (sup.image_url ?? [])"
-                      :key="'sup-img-' + i"
-                      :src="imgUrl(url)"
-                      alt="補件憑證"
-                      @click="openLightbox(imgUrl(url))"
-                      class="w-14 h-14 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:opacity-80 transition-opacity"
-                    />
-                    <img
-                      v-for="(url, i) in (sup.item_image_url ?? [])"
-                      :key="'sup-item-' + i"
-                      :src="imgUrl(url)"
-                      alt="補件物品照"
-                      @click="openLightbox(imgUrl(url))"
-                      class="w-14 h-14 object-cover rounded-lg border border-purple-200 cursor-zoom-in hover:opacity-80 transition-opacity ring-1 ring-purple-300"
-                    />
-                    <div v-if="!(sup.image_url?.length) && !(sup.item_image_url?.length)" class="text-xs text-gray-300 italic py-2">
-                      （無圖片）
-                    </div>
-                  </div>
-
-                  <!-- 補件操作：只有解除（案件整體確認由底部按鈕處理） -->
-                  <div class="flex gap-2 pt-1">
+                  <component
+                    :is="expandedInvoiceId === item.invoice.id ? ChevronDown : ChevronRight"
+                    :size="15" class="text-gray-400 shrink-0"
+                  />
+                  <span class="w-2 h-2 rounded-full shrink-0"
+                    :class="getStatusConfig(item.invoice.status).dot" />
+                  <span class="font-mono text-xs font-semibold text-gray-800">{{ item.invoice.serial_number }}</span>
+                  <span v-if="item.invoice.total_amount != null" class="text-xs text-gray-500">
+                    NT${{ Number(item.invoice.total_amount).toLocaleString() }}
+                  </span>
+                  <span v-if="item.invoice.invoice_number" class="text-[11px] font-mono text-gray-400 truncate">
+                    {{ item.invoice.invoice_number }}
+                  </span>
+                  <div class="ml-auto flex items-center gap-1.5 shrink-0">
+                    <span v-if="item.supplements?.length > 0"
+                      class="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded">
+                      已配對{{ item.supplements.length > 1 ? ` (${item.supplements.length})` : '' }}
+                    </span>
+                    <span v-else class="text-[10px] bg-orange-100 text-orange-500 px-1.5 py-0.5 rounded">待配對</span>
+                    <span v-if="dragOverInvoiceId === item.invoice.id"
+                      class="text-[10px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded animate-pulse">
+                      放開以配對
+                    </span>
+                    <!-- 移出待退貨管理 -->
                     <button
-                      @click.stop="unlinkSupplement(sup, item.invoice)"
-                      :disabled="unlinkingId === sup.id"
-                      class="flex items-center gap-1 px-3 py-1.5 border border-gray-300 hover:border-red-300 hover:text-red-500 text-gray-500 text-xs rounded-lg transition-colors disabled:opacity-50"
-                      title="解除配對，補件移回孤立補件區"
+                      @click.stop="removeFromWaitingReturn(item)"
+                      :disabled="removingCaseId === item.invoice.id"
+                      class="flex items-center justify-center w-5 h-5 rounded hover:bg-red-50 text-gray-300 hover:text-red-400 disabled:opacity-50 transition-colors"
+                      title="移出待退貨管理"
                     >
-                      <Loader2 v-if="unlinkingId === sup.id" :size="12" class="animate-spin" />
-                      <Unlink2 v-else :size="12" />
-                      解除
+                      <Loader2 v-if="removingCaseId === item.invoice.id" :size="11" class="animate-spin" />
+                      <Trash2 v-else :size="11" />
                     </button>
                   </div>
                 </div>
 
-                <!-- 案件層級確認完成（永遠顯示，讓案件可移出待退貨管理） -->
-                <div class="pt-1">
-                  <button
-                    @click.stop="finalizeCase(item)"
-                    :disabled="finalizingInvoiceId === item.invoice.id"
-                    class="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
-                  >
-                    <Loader2 v-if="finalizingInvoiceId === item.invoice.id" :size="12" class="animate-spin" />
-                    <CheckCircle2 v-else :size="12" />
-                    {{ finalizingInvoiceId === item.invoice.id ? '處理中...' : '確認配對完成' }}
-                  </button>
-                </div>
+                <!-- 展開區：補件 + 按鈕 -->
+                <div v-if="expandedInvoiceId === item.invoice.id" class="px-4 pb-4 space-y-3">
+                  <!-- 原始憑證照片 -->
+                  <div>
+                    <p class="text-[10px] text-gray-400 mb-1.5 font-medium">原始憑證照片</p>
+                    <div class="flex flex-wrap gap-2">
+                      <img
+                        v-for="(url, i) in (item.invoice.image_url ?? [])"
+                        :key="'inv-img-'+i"
+                        :src="imgUrl(url)" alt="憑證照片"
+                        @click="openLightbox(imgUrl(url))"
+                        class="w-14 h-14 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:opacity-80 transition-opacity"
+                      />
+                      <span v-if="!(item.invoice.image_url?.length)" class="text-xs text-gray-300 italic py-2">（無原始照片）</span>
+                    </div>
+                  </div>
 
-                <!-- 拖曳放置區（永遠顯示，支援繼續新增補件） -->
-                <div
-                  class="flex items-center justify-center h-12 border-2 border-dashed rounded-xl text-xs transition-colors"
-                  :class="dragOverInvoiceId === item.invoice.id
-                    ? 'border-purple-400 text-purple-400 bg-purple-50'
-                    : item.supplements?.length
-                      ? 'border-gray-100 text-gray-300'
-                      : 'border-gray-200 text-gray-400'"
-                >
-                  <Link2 :size="13" class="mr-1.5" />
-                  {{ item.supplements?.length ? '繼續拖曳補件至此' : '從右欄拖曳補件至此以配對' }}
+                  <!-- 已配對的補件 -->
+                  <div
+                    v-for="sup in (item.supplements ?? [])"
+                    :key="sup.id"
+                    class="bg-gray-50 rounded-xl border border-gray-200 p-3 space-y-2"
+                  >
+                    <div class="flex items-center gap-1.5">
+                      <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="getStatusConfig(sup.status).dot" />
+                      <span class="font-mono text-[11px] text-gray-600">{{ sup.serial_number }}</span>
+                      <span class="text-[10px] text-gray-400">{{ sup.uploader_name }}</span>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                      <img v-for="(url, i) in (sup.image_url ?? [])" :key="'sup-img-'+i"
+                        :src="imgUrl(url)" alt="補件憑證"
+                        @click="openLightbox(imgUrl(url))"
+                        class="w-14 h-14 object-cover rounded-lg border border-gray-200 cursor-zoom-in hover:opacity-80 transition-opacity"
+                      />
+                      <img v-for="(url, i) in (sup.item_image_url ?? [])" :key="'sup-item-'+i"
+                        :src="imgUrl(url)" alt="補件物品照"
+                        @click="openLightbox(imgUrl(url))"
+                        class="w-14 h-14 object-cover rounded-lg border border-purple-200 cursor-zoom-in hover:opacity-80 transition-opacity ring-1 ring-purple-300"
+                      />
+                      <div v-if="!(sup.image_url?.length) && !(sup.item_image_url?.length)" class="text-xs text-gray-300 italic py-2">（無圖片）</div>
+                    </div>
+                    <div class="flex gap-2 pt-1">
+                      <button
+                        @click.stop="unlinkSupplement(sup, item.invoice)"
+                        :disabled="unlinkingId === sup.id"
+                        class="flex items-center gap-1 px-3 py-1.5 border border-gray-300 hover:border-red-300 hover:text-red-500 text-gray-500 text-xs rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        <Loader2 v-if="unlinkingId === sup.id" :size="12" class="animate-spin" />
+                        <Unlink2 v-else :size="12" />
+                        解除
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- 確認完成 -->
+                  <div class="pt-1">
+                    <button
+                      @click.stop="finalizeCase(item)"
+                      :disabled="finalizingInvoiceId === item.invoice.id"
+                      class="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
+                    >
+                      <Loader2 v-if="finalizingInvoiceId === item.invoice.id" :size="12" class="animate-spin" />
+                      <CheckCircle2 v-else :size="12" />
+                      {{ finalizingInvoiceId === item.invoice.id ? '處理中...' : '確認配對完成' }}
+                    </button>
+                  </div>
+
+                  <!-- 拖曳放置區 -->
+                  <div
+                    class="flex items-center justify-center h-12 border-2 border-dashed rounded-xl text-xs transition-colors"
+                    :class="dragOverInvoiceId === item.invoice.id
+                      ? 'border-purple-400 text-purple-400 bg-purple-50'
+                      : item.supplements?.length
+                        ? 'border-gray-100 text-gray-300'
+                        : 'border-gray-200 text-gray-400'"
+                  >
+                    <Link2 :size="13" class="mr-1.5" />
+                    {{ item.supplements?.length ? '繼續拖曳補件至此' : '從右欄拖曳補件至此以配對' }}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-          </div><!-- /flex-1 overflow-y-auto -->
         </div>
 
-        <!-- ── 右欄：補件物品照池 ── -->
+        <!-- ── 右欄：補件池 ── -->
         <div class="w-[42%] flex flex-col min-h-0">
 
-          <!-- 右欄標題 + 篩選（Popover Pattern） -->
+          <!-- 右欄 Toolbar -->
           <div class="shrink-0 px-4 pt-3 pb-2 border-b border-gray-100 relative">
-
-            <!-- 標題列 + 篩選按鈕 -->
-            <div class="flex items-start justify-between gap-2">
+            <div class="flex items-start justify-between gap-2 mb-1.5">
               <div>
                 <p class="text-[11px] font-medium text-gray-600">
                   待配對補件
                   <span class="font-normal text-gray-300 ml-0.5">— 拖曳至左側憑證以配對</span>
                 </p>
                 <p class="text-[10px] text-gray-400 mt-0.5">
-                  {{ rightActiveCount > 0 ? `篩選結果（${rightPanelItems.length} 筆）` : `孤立補件（${orphanSupplements.length} 筆）` }}
+                  孤立補件（{{ orphanSupplements.length }} 筆）
+                  <span v-if="rightActiveCount > 0" class="text-purple-500">— 顯示 {{ filteredOrphanSupplements.length }} 筆</span>
                 </p>
               </div>
-              <button
-                @click="showRightFilter = !showRightFilter"
-                class="flex items-center gap-1 px-2 py-1 text-xs border rounded-lg transition-colors shrink-0"
-                :class="showRightFilter || rightActiveCount > 0
-                  ? 'border-purple-300 bg-purple-50 text-purple-600'
-                  : 'border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600'"
-              >
-                <SlidersHorizontal :size="11" />
-                <span>篩選</span>
-                <span v-if="rightActiveCount > 0"
-                  class="ml-0.5 inline-flex items-center justify-center w-4 h-4 bg-purple-500 text-white rounded-full text-[9px] font-bold">
-                  {{ rightActiveCount }}
-                </span>
-              </button>
+              <div class="flex items-center gap-1 shrink-0">
+                <!-- 新增按鈕 -->
+                <button
+                  @click="showRightAdd = !showRightAdd; showRightFilter = false"
+                  class="flex items-center gap-1 px-2 py-1 text-xs border rounded-lg transition-colors"
+                  :class="showRightAdd
+                    ? 'border-teal-300 bg-teal-50 text-teal-600'
+                    : 'border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600'"
+                >
+                  <Plus :size="11" />
+                  <span>新增</span>
+                </button>
+                <!-- 篩選按鈕 -->
+                <button
+                  @click="showRightFilter = !showRightFilter; showRightAdd = false"
+                  class="flex items-center gap-1 px-2 py-1 text-xs border rounded-lg transition-colors"
+                  :class="showRightFilter || rightActiveCount > 0
+                    ? 'border-purple-300 bg-purple-50 text-purple-600'
+                    : 'border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600'"
+                >
+                  <SlidersHorizontal :size="11" />
+                  <span>篩選</span>
+                  <span v-if="rightActiveCount > 0"
+                    class="ml-0.5 inline-flex items-center justify-center w-4 h-4 bg-purple-500 text-white rounded-full text-[9px] font-bold">
+                    {{ rightActiveCount }}
+                  </span>
+                </button>
+              </div>
             </div>
 
-            <!-- Active chips -->
-            <div v-if="rightActiveCount > 0" class="flex flex-wrap gap-1 mt-1.5">
+            <!-- Active chips for right filter -->
+            <div v-if="rightActiveCount > 0" class="flex flex-wrap gap-1">
               <span v-if="rightFilter.serial_number"
                 class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
                 EXP: {{ rightFilter.serial_number }}
-                <button @click="rightFilter.serial_number = ''; searchSupplementsAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+                <button @click="rightFilter.serial_number = ''" class="ml-0.5 hover:text-purple-900">×</button>
               </span>
               <span v-if="rightFilter.invoice_number"
                 class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
                 發票: {{ rightFilter.invoice_number }}
-                <button @click="rightFilter.invoice_number = ''; searchSupplementsAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+                <button @click="rightFilter.invoice_number = ''" class="ml-0.5 hover:text-purple-900">×</button>
               </span>
               <span v-if="rightFilter.uploader_name"
                 class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
                 {{ rightFilter.uploader_name }}
-                <button @click="rightFilter.uploader_name = ''; searchSupplementsAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+                <button @click="rightFilter.uploader_name = ''" class="ml-0.5 hover:text-purple-900">×</button>
               </span>
               <span v-if="rightFilter.uploader_dept"
                 class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
                 {{ rightFilter.uploader_dept }}
-                <button @click="rightFilter.uploader_dept = ''; searchSupplementsAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+                <button @click="rightFilter.uploader_dept = ''" class="ml-0.5 hover:text-purple-900">×</button>
               </span>
               <span v-if="rightFilter.date_from || rightFilter.date_to"
                 class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
                 {{ rightFilter.date_from || '起' }} ～ {{ rightFilter.date_to || '今' }}
-                <button @click="rightFilter.date_from = ''; rightFilter.date_to = ''; searchSupplementsAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+                <button @click="rightFilter.date_from = ''; rightFilter.date_to = ''" class="ml-0.5 hover:text-purple-900">×</button>
               </span>
               <span v-if="rightFilter.amount_min !== '' || rightFilter.amount_max !== ''"
                 class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
                 NT${{ rightFilter.amount_min || '0' }}～{{ rightFilter.amount_max || '∞' }}
-                <button @click="rightFilter.amount_min = ''; rightFilter.amount_max = ''; searchSupplementsAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+                <button @click="rightFilter.amount_min = ''; rightFilter.amount_max = ''" class="ml-0.5 hover:text-purple-900">×</button>
               </span>
               <span v-if="rightFilter.voucher_category"
                 class="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-50 border border-purple-200 text-purple-700 text-[10px] rounded-full">
-                {{ VOUCHER_CATEGORY_LABEL[rightFilter.voucher_category] ?? rightFilter.voucher_category }}
-                <button @click="rightFilter.voucher_category = ''; searchSupplementsAdvanced()" class="ml-0.5 hover:text-purple-900">×</button>
+                {{ getVoucherLabel(rightFilter.voucher_category) }}
+                <button @click="rightFilter.voucher_category = ''" class="ml-0.5 hover:text-purple-900">×</button>
               </span>
               <button @click="clearRightFilter" class="text-[10px] text-gray-400 hover:text-gray-600 ml-auto shrink-0">
                 清除全部
               </button>
             </div>
 
-            <!-- Popover panel（右對齊） -->
+            <!-- 右欄新增 Panel -->
+            <div v-if="showRightAdd" class="mt-1.5">
+              <div class="flex gap-1">
+                <input
+                  v-model="rightAddQuery"
+                  @keyup.enter="searchForRightAdd"
+                  placeholder="輸入案件編號或關鍵字..."
+                  class="flex-1 text-xs px-2.5 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-teal-400"
+                />
+                <button @click="searchForRightAdd" :disabled="isRightAdding"
+                  class="flex items-center gap-1 px-2.5 py-1.5 bg-teal-500 hover:bg-teal-600 text-white text-xs rounded-lg disabled:opacity-50 transition-colors shrink-0">
+                  <Loader2 v-if="isRightAdding" :size="11" class="animate-spin" />
+                  <Search v-else :size="11" />
+                </button>
+              </div>
+              <div v-if="rightAddResults.length"
+                class="mt-1 bg-white border border-gray-200 rounded-lg overflow-hidden max-h-36 overflow-y-auto">
+                <div v-for="exp in rightAddResults" :key="exp.id"
+                  @click="addToRightPanel(exp)"
+                  class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-teal-50 border-b border-gray-100 last:border-0">
+                  <span class="font-mono text-[11px] text-gray-800">{{ exp.serial_number }}</span>
+                  <span v-if="exp.invoice_number" class="text-[10px] font-mono text-gray-400">{{ exp.invoice_number }}</span>
+                  <span class="text-[10px] text-gray-500 truncate">{{ exp.uploader_name }}</span>
+                  <span v-if="exp.total_amount != null" class="text-[10px] text-gray-500 shrink-0">
+                    NT${{ Number(exp.total_amount).toLocaleString() }}
+                  </span>
+                  <span class="text-[9px] text-gray-400 shrink-0">{{ relationTypeLabel(autoDetectRelationType(exp)) }}</span>
+                  <span class="ml-auto text-[10px] bg-teal-100 text-teal-600 px-1.5 py-0.5 rounded shrink-0">加入</span>
+                </div>
+              </div>
+              <p v-else-if="rightAddQuery && !isRightAdding" class="text-[10px] text-gray-400 text-center py-1.5">
+                未找到符合的費用
+              </p>
+            </div>
+
+            <!-- 右欄篩選 Popover -->
             <div v-if="showRightFilter"
               class="absolute right-4 top-full mt-1 z-30 w-72 bg-white border border-gray-200 rounded-xl shadow-xl p-3 space-y-1.5">
               <div class="grid grid-cols-2 gap-1">
-                <input v-model="rightFilter.serial_number" @keyup.enter="searchSupplementsAdvanced"
-                  placeholder="EXP編號"
+                <input v-model="rightFilter.serial_number" placeholder="EXP編號"
                   class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
-                <input v-model="rightFilter.invoice_number" @keyup.enter="searchSupplementsAdvanced"
-                  placeholder="發票號碼"
+                <input v-model="rightFilter.invoice_number" placeholder="發票號碼"
                   class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
               </div>
               <div class="grid grid-cols-2 gap-1">
-                <input v-model="rightFilter.uploader_name" @keyup.enter="searchSupplementsAdvanced"
-                  placeholder="上傳者姓名"
+                <input v-model="rightFilter.uploader_name" placeholder="上傳者姓名"
                   class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400" />
                 <select v-model="rightFilter.uploader_dept"
                   class="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400 bg-white">
@@ -877,23 +918,12 @@ async function unlinkSupplement(supplement, invoice) {
               <select v-model="rightFilter.voucher_category"
                 class="w-full text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-purple-400 bg-white">
                 <option value="">全部憑證類別</option>
-                <option value="INVOICE">電子發票</option>
-                <option value="RECEIPT">收據</option>
-                <option value="TRANSPORTATION">交通票據</option>
-                <option value="LABOR_SERVICE">勞務服務</option>
-                <option value="INSURANCE">保險</option>
-                <option value="RENTAL">租金</option>
-                <option value="ACCOMMODATION">住宿</option>
-                <option value="UTILITY">水電費</option>
-                <option value="POSTAGE">郵寄費用</option>
+                <option v-for="cat in voucherCategoryOptions" :key="cat.key" :value="cat.key">{{ cat.label }}</option>
               </select>
               <div class="flex gap-1 pt-0.5">
-                <button @click="searchSupplementsAdvanced(); showRightFilter = false"
-                  :disabled="isRightFilterSearching || rightActiveCount === 0"
-                  class="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 bg-purple-500 hover:bg-purple-600 text-white text-xs rounded-lg disabled:opacity-50 transition-colors">
-                  <Loader2 v-if="isRightFilterSearching" :size="11" class="animate-spin" />
-                  <Search v-else :size="11" />
-                  {{ isRightFilterSearching ? '搜尋中...' : '套用篩選' }}
+                <button @click="showRightFilter = false"
+                  class="flex-1 px-2.5 py-1.5 bg-purple-500 hover:bg-purple-600 text-white text-xs rounded-lg transition-colors">
+                  套用
                 </button>
                 <button @click="clearRightFilter(); showRightFilter = false"
                   class="px-2.5 py-1.5 border border-gray-200 text-gray-400 hover:text-gray-600 text-xs rounded-lg transition-colors">
@@ -905,19 +935,15 @@ async function unlinkSupplement(supplement, invoice) {
 
           <!-- 補件卡片清單 -->
           <div class="flex-1 overflow-y-auto px-3 py-2 space-y-2">
-
-            <!-- 無資料 -->
-            <div v-if="rightPanelItems.length === 0"
+            <div v-if="filteredOrphanSupplements.length === 0"
               class="flex flex-col items-center justify-center h-full text-gray-300 text-xs gap-2">
               <PackageX :size="28" class="opacity-40" />
               <span v-if="rightActiveCount > 0">無符合篩選條件的補件</span>
-              <span v-else-if="searchQuery.trim()">未找到符合的補件</span>
               <span v-else>目前無孤立補件</span>
             </div>
 
-            <!-- 補件卡片（draggable） -->
             <div
-              v-for="sup in rightPanelItems"
+              v-for="sup in filteredOrphanSupplements"
               :key="sup.id"
               draggable="true"
               @dragstart="onDragStart($event, sup)"
@@ -929,24 +955,18 @@ async function unlinkSupplement(supplement, invoice) {
             >
               <!-- 卡片標題 -->
               <div class="flex items-center gap-1.5 mb-1.5">
-                <span class="w-1.5 h-1.5 rounded-full shrink-0"
-                  :class="STATUS_DOT[sup.status] ?? 'bg-gray-300'" />
+                <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="getStatusConfig(sup.status).dot" />
                 <span class="font-mono text-[11px] font-semibold text-gray-700 truncate">{{ sup.serial_number }}</span>
-                <!-- 情境類型 badge -->
                 <span v-if="relationTypeLabel(sup.relation_type)"
-                  class="text-[9px] px-1 py-0.5 rounded shrink-0 font-medium"
-                  :class="{
-                    'bg-blue-100 text-blue-600': sup.relation_type === 'VOID_REPLACE',
-                    'bg-orange-100 text-orange-600': sup.relation_type === 'CREDIT_NOTE',
-                    'bg-purple-100 text-purple-600': sup.relation_type === 'RETURN_SUPPLEMENT',
-                  }"
+                  class="text-[9px] px-1 py-0.5 rounded shrink-0 font-medium border"
+                  :class="getRelationTypeConfig(sup.relation_type)?.badgeClass"
                 >{{ relationTypeLabel(sup.relation_type) }}</span>
                 <span class="text-[10px] text-gray-400 shrink-0">{{ sup.uploader_name }}</span>
                 <button
                   @click.stop="deleteOrphanSupplement(sup)"
                   :disabled="deletingOrphanId === sup.id"
                   class="ml-auto flex items-center justify-center w-5 h-5 rounded hover:bg-red-50 text-gray-300 hover:text-red-400 disabled:opacity-50 transition-colors"
-                  title="刪除孤立補件"
+                  title="移出待退貨管理（保留費用資料）"
                 >
                   <Loader2 v-if="deletingOrphanId === sup.id" :size="11" class="animate-spin" />
                   <Trash2 v-else :size="11" />
@@ -964,23 +984,20 @@ async function unlinkSupplement(supplement, invoice) {
                 >一鍵確認</button>
               </div>
 
-              <!-- 發票資訊列 -->
+              <!-- 發票資訊 -->
               <div class="flex flex-wrap gap-x-3 gap-y-0.5 mb-1.5">
                 <span v-if="sup.total_amount != null" class="text-[11px] font-medium text-gray-700">
                   NT${{ Number(sup.total_amount).toLocaleString() }}
                 </span>
-                <span v-if="sup.expense_date" class="text-[10px] text-gray-400">
-                  {{ sup.expense_date }}
-                </span>
-                <span v-if="sup.invoice_number" class="text-[10px] font-mono text-gray-400 truncate">
-                  {{ sup.invoice_number }}
-                </span>
+                <span v-if="sup.expense_date" class="text-[10px] text-gray-400">{{ sup.expense_date }}</span>
+                <span v-if="sup.invoice_number" class="text-[10px] font-mono text-gray-400 truncate">{{ sup.invoice_number }}</span>
               </div>
 
               <!-- 備註 -->
               <div class="mb-1.5 space-y-0.5">
-                <p v-if="sup.item_description" class="text-[10px] text-gray-500 truncate"
-                  :title="sup.item_description">{{ sup.item_description }}</p>
+                <p v-if="sup.item_description" class="text-[10px] text-gray-500 truncate" :title="sup.item_description">
+                  {{ sup.item_description }}
+                </p>
                 <p class="text-[10px] rounded px-1.5 py-1"
                   :class="sup.user_description ? 'bg-amber-50 text-amber-700' : 'text-gray-300 italic'"
                   :title="sup.user_description || ''">
@@ -988,7 +1005,7 @@ async function unlinkSupplement(supplement, invoice) {
                 </p>
               </div>
 
-              <!-- 圖片縮圖：image_url（憑證）+ item_image_url（物品照）-->
+              <!-- 圖片縮圖 -->
               <div class="flex flex-wrap gap-1.5">
                 <div v-for="(url, i) in (sup.item_image_url ?? [])" :key="'item-'+i"
                   class="relative cursor-zoom-in w-10 h-10 rounded-lg border border-gray-200 overflow-hidden flex items-center justify-center bg-gray-50"
@@ -1057,15 +1074,11 @@ async function unlinkSupplement(supplement, invoice) {
       tabindex="0"
     >
       <img
-        :src="lightboxUrl"
-        alt="圖片預覽"
+        :src="lightboxUrl" alt="圖片預覽"
         class="max-w-full max-h-full object-contain rounded-lg shadow-2xl cursor-default"
         @click.stop
       />
-      <button
-        @click="closeLightbox"
-        class="absolute top-4 right-4 text-white/60 hover:text-white transition-colors"
-      >
+      <button @click="closeLightbox" class="absolute top-4 right-4 text-white/60 hover:text-white transition-colors">
         <X :size="28" />
       </button>
     </div>
