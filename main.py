@@ -2,6 +2,7 @@
 
 import logging
 import os as _os
+import re as _re
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -71,15 +72,37 @@ _NO_CACHE_HEADERS = {
     "Expires": "0",
 }
 
+# 合法主機名格式：字母/數字/連字號/點，可選 :port（1–5 位數）
+_SAFE_HOST_RE = _re.compile(r"^[a-zA-Z0-9.\-]+(:[0-9]{1,5})?$")
+
+
+def _get_base_url(request: Request) -> str:
+    """
+    從反向代理 header 安全地提取 base URL。
+
+    x-forwarded-host 是用戶可控的 HTTP header，若未驗證直接注入 HTML，
+    攻擊者可偽造惡意字串觸發 XSS（Host Header Injection）。
+    此函式用 regex 白名單驗證後才使用，不合法則 fallback 到
+    TCP 層的真實 Host header。
+    """
+    raw_forwarded = request.headers.get("x-forwarded-host", "")
+    host = (
+        raw_forwarded
+        if raw_forwarded and _SAFE_HOST_RE.match(raw_forwarded)
+        else request.headers.get("host", "localhost:8000")
+    )
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
+    if proto not in ("http", "https"):
+        proto = "http"
+    return f"{proto}://{host}"
+
 
 @app.get("/liff-app", include_in_schema=False)
 @app.get("/liff-app/", include_in_schema=False)
 async def serve_liff_root(request: Request) -> Response:
     """LIFF 批次報帳前端（多憑證模式）。"""
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "localhost:8000")
-    proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
     return Response(
-        content=_inject_liff_vars(_liff_index, f"{proto}://{host}"),
+        content=_inject_liff_vars(_liff_index, _get_base_url(request)),
         media_type="text/html; charset=utf-8",
         headers=_NO_CACHE_HEADERS,
     )
@@ -89,10 +112,8 @@ async def serve_liff_root(request: Request) -> Response:
 @app.get("/liff-single/", include_in_schema=False)
 async def serve_liff_single(request: Request) -> Response:
     """LIFF 單筆報帳前端（每次 1 筆，0–1 張憑證）。"""
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host", "localhost:8000")
-    proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
     return Response(
-        content=_inject_liff_vars(_liff_single, f"{proto}://{host}"),
+        content=_inject_liff_vars(_liff_single, _get_base_url(request)),
         media_type="text/html; charset=utf-8",
         headers=_NO_CACHE_HEADERS,
     )
