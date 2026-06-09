@@ -3,7 +3,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { X, Loader2, PackageX, CheckCircle2, ChevronRight, ChevronDown, Search, Link2, Unlink2, Trash2, SlidersHorizontal } from 'lucide-vue-next'
 import { fetchWaitingReturns, fetchExpenses, fetchRelatedExpenses, updateExpense, deleteExpense, pairExpense } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
-import { secureImgUrl as imgUrl } from '../utils/imageUrl'
+import { secureImgUrl as imgUrl, isViewableImage } from '../utils/imageUrl'
 
 const emit = defineEmits(['close', 'count-changed'])
 
@@ -979,17 +979,19 @@ async function unlinkSupplement(supplement, invoice) {
               <!-- 圖片縮圖：image_url（憑證）+ item_image_url（物品照）-->
               <div class="flex flex-wrap gap-1.5">
                 <div v-for="(url, i) in (sup.item_image_url ?? [])" :key="'item-'+i"
-                  class="relative cursor-zoom-in"
-                  @click.stop="openLightbox(imgUrl(url))">
-                  <img :src="imgUrl(url)" alt="物品照"
-                    class="w-10 h-10 object-cover rounded-lg border border-gray-200 hover:opacity-80 transition-opacity" />
+                  class="relative cursor-zoom-in w-10 h-10 rounded-lg border border-gray-200 overflow-hidden flex items-center justify-center bg-gray-50"
+                  @click.stop="isViewableImage(url) ? openLightbox(imgUrl(url)) : null">
+                  <img v-if="isViewableImage(url)" :src="imgUrl(url)" alt="物品照"
+                    class="w-full h-full object-cover hover:opacity-80 transition-opacity" />
+                  <a v-else :href="imgUrl(url)" target="_blank" class="text-red-500 text-[9px] font-bold" @click.stop>PDF</a>
                   <span class="absolute bottom-0 inset-x-0 text-[7px] text-white bg-gray-600 text-center rounded-b-lg">品</span>
                 </div>
                 <div v-for="(url, i) in (sup.image_url ?? [])" :key="'exp-'+i"
-                  class="relative cursor-zoom-in"
-                  @click.stop="openLightbox(imgUrl(url))">
-                  <img :src="imgUrl(url)" alt="憑證"
-                    class="w-10 h-10 object-cover rounded-lg border border-gray-200 hover:opacity-80 transition-opacity" />
+                  class="relative cursor-zoom-in w-10 h-10 rounded-lg border border-gray-200 overflow-hidden flex items-center justify-center bg-gray-50"
+                  @click.stop="isViewableImage(url) ? openLightbox(imgUrl(url)) : null">
+                  <img v-if="isViewableImage(url)" :src="imgUrl(url)" alt="憑證"
+                    class="w-full h-full object-cover hover:opacity-80 transition-opacity" />
+                  <a v-else :href="imgUrl(url)" target="_blank" class="text-red-500 text-[9px] font-bold" @click.stop>PDF</a>
                   <span class="absolute bottom-0 inset-x-0 text-[7px] text-white bg-green-600 text-center rounded-b-lg">憑</span>
                 </div>
                 <div v-if="!(sup.item_image_url?.length) && !(sup.image_url?.length)"

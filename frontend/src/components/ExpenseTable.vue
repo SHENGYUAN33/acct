@@ -7,7 +7,7 @@ import { toast } from 'vue3-toastify'
 import { Pencil, Trash2, Plus, ChevronsUpDown, ChevronRight, Link2, GripVertical, Unlink2 } from 'lucide-vue-next'
 import ConfirmModal from './ConfirmModal.vue'
 import BatchGroupModal from './BatchGroupModal.vue'
-import { secureImgUrl } from '../utils/imageUrl'
+import { secureImgUrl, isViewableImage } from '../utils/imageUrl'
 
 const store = useExpenseStore()
 
@@ -568,9 +568,10 @@ async function handleUnlinkSupplement(parentExpense, sup) {
               <td class="px-3 py-2">
                 <div
                   v-if="expense.image_url && expense.image_url.length > 0"
-                  class="w-10 h-10 rounded overflow-hidden border border-gray-200"
+                  class="w-10 h-10 rounded overflow-hidden border border-gray-200 flex items-center justify-center bg-gray-50"
                 >
-                  <img :src="expense.image_url[0]" alt="費用影像" class="w-full h-full object-cover" />
+                  <img v-if="isViewableImage(expense.image_url[0])" :src="expense.image_url[0]" alt="費用影像" class="w-full h-full object-cover" />
+                  <a v-else :href="expense.image_url[0]" target="_blank" class="text-red-500 text-xs font-bold" title="開啟 PDF">PDF</a>
                 </div>
                 <div
                   v-else
@@ -584,9 +585,10 @@ async function handleUnlinkSupplement(parentExpense, sup) {
               <td class="px-3 py-2">
                 <div
                   v-if="expense.item_image_url && expense.item_image_url.length > 0"
-                  class="w-10 h-10 rounded overflow-hidden border border-gray-200"
+                  class="w-10 h-10 rounded overflow-hidden border border-gray-200 flex items-center justify-center bg-gray-50"
                 >
-                  <img :src="expense.item_image_url[0]" alt="物品影像" class="w-full h-full object-cover" />
+                  <img v-if="isViewableImage(expense.item_image_url[0])" :src="expense.item_image_url[0]" alt="物品影像" class="w-full h-full object-cover" />
+                  <a v-else :href="expense.item_image_url[0]" target="_blank" class="text-red-500 text-xs font-bold" title="開啟 PDF">PDF</a>
                 </div>
                 <div
                   v-else

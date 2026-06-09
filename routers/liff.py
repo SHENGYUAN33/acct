@@ -97,7 +97,7 @@ def create_session(
     status_code=status.HTTP_201_CREATED,
     summary="上傳單張圖片至 Session",
 )
-def upload_image(
+async def upload_image(
     session_id: uuid.UUID,
     file: UploadFile = File(..., description="圖片檔案"),
     sequence_order: int = Form(..., description="前端凍結的排列順序（0-based）"),
@@ -111,13 +111,14 @@ def upload_image(
     **重要**：sequence_order 由前端在使用者按下「送出」瞬間 Object.freeze() 凍結，
     後端永遠以此欄位排序，與圖片到達時間無關。
     """
-    if file.content_type and not file.content_type.startswith("image/"):
+    _ct = (file.content_type or "").lower()
+    if _ct and not _ct.startswith("image/") and _ct != "application/pdf":
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"不支援的檔案類型：{file.content_type}，請上傳圖片檔",
+            detail=f"不支援的檔案類型：{file.content_type}。允許：圖片或 PDF",
         )
 
-    img_record, ocr_completed, is_voucher = liff_service.add_image(
+    img_record, ocr_completed, is_voucher = await liff_service.add_image(
         db=db,
         session_id=session_id,
         upload_file=file,

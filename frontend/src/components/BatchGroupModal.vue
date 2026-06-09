@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { X, Loader2, ImageOff } from 'lucide-vue-next'
 import { fetchBatchExpenses } from '../api/expenseApi'
 import { toast } from 'vue3-toastify'
-import { secureImgUrl as imgUrl } from '../utils/imageUrl'
+import { secureImgUrl as imgUrl, isViewableImage } from '../utils/imageUrl'
 
 const props = defineProps({
   expenseId: { type: String, required: true },
@@ -143,13 +143,23 @@ onMounted(loadBatch)
               class="flex flex-col items-center gap-2 w-40"
             >
               <!-- 縮圖 -->
-              <div class="w-40 h-40 rounded-xl border border-gray-200 overflow-hidden bg-gray-50 shrink-0">
+              <div class="w-40 h-40 rounded-xl border border-gray-200 overflow-hidden bg-gray-50 shrink-0 flex items-center justify-center">
                 <img
+                  v-if="isViewableImage(img.image_url)"
                   :src="imgUrl(img.image_url)"
                   :alt="img.voucher_category || '圖片'"
                   class="w-full h-full object-cover"
                   draggable="false"
                 />
+                <a
+                  v-else
+                  :href="imgUrl(img.image_url)"
+                  target="_blank"
+                  class="flex flex-col items-center gap-1 text-gray-500 hover:text-blue-600"
+                >
+                  <span class="text-3xl">📄</span>
+                  <span class="text-xs">開啟 PDF</span>
+                </a>
               </div>
 
               <!-- 標籤 -->

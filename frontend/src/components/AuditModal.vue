@@ -16,7 +16,7 @@ import {
   RefreshCw,
   ScanLine,
 } from 'lucide-vue-next'
-import { secureImgUrl } from '../utils/imageUrl'
+import { secureImgUrl, isViewableImage } from '../utils/imageUrl'
 
 const store = useExpenseStore()
 
@@ -862,13 +862,28 @@ function formatDateTime(val) {
                   <!-- 有圖（含本地暫存）：輪播大圖 + 更換按鈕 + 縮圖列 -->
                   <div v-if="allExpenseImages.length > 0">
                     <div class="relative group mb-2">
+                      <!-- 一般圖片 -->
                       <img
+                        v-if="isViewableImage(currentExpenseImage)"
                         :src="currentExpenseImage"
                         alt="費用影像"
                         class="w-full rounded-lg border border-gray-300 object-contain cursor-zoom-in"
                         style="max-height: 400px"
                         @click="openLightbox(currentExpenseImage)"
                       />
+                      <!-- PDF / 非圖片格式 -->
+                      <div
+                        v-else
+                        class="w-full rounded-lg border border-gray-300 bg-gray-50 flex flex-col items-center justify-center gap-3"
+                        style="min-height: 200px"
+                      >
+                        <span class="text-4xl">📄</span>
+                        <a
+                          :href="currentExpenseImage"
+                          target="_blank"
+                          class="text-blue-600 hover:underline text-sm font-medium"
+                        >在新分頁開啟 PDF</a>
+                      </div>
                       <!-- 右上角：更換按鈕（Edit Mode 且為已上傳的圖才顯示） -->
                       <button
                         v-if="!isCreateMode && activeExpenseIdx < (form.image_url || []).length"
@@ -880,8 +895,9 @@ function formatDateTime(val) {
                         <RefreshCw v-else :size="11" />
                         更換
                       </button>
-                      <!-- 左上角：放大按鈕 -->
+                      <!-- 左上角：放大按鈕（僅圖片顯示） -->
                       <button
+                        v-if="isViewableImage(currentExpenseImage)"
                         @click="openLightbox(currentExpenseImage)"
                         class="absolute top-2 left-2 bg-black/50 hover:bg-black/70 text-white rounded p-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
                         title="放大檢視"
@@ -894,13 +910,14 @@ function formatDateTime(val) {
                       <div
                         v-for="(url, i) in allExpenseImages"
                         :key="i"
-                        class="w-14 h-14 rounded border-2 cursor-pointer overflow-hidden transition-colors"
+                        class="w-14 h-14 rounded border-2 cursor-pointer overflow-hidden transition-colors flex items-center justify-center bg-gray-50"
                         :class="i === activeExpenseIdx
                           ? 'border-blue-500'
                           : 'border-gray-200 hover:border-gray-400'"
                         @click="activeExpenseIdx = i"
                       >
-                        <img :src="url" class="w-full h-full object-cover" />
+                        <img v-if="isViewableImage(url)" :src="url" class="w-full h-full object-cover" />
+                        <span v-else class="text-xs text-red-500 font-bold">PDF</span>
                       </div>
                     </div>
                   </div>
