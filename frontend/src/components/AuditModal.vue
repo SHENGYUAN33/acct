@@ -769,19 +769,17 @@ function formatDateTime(val) {
                   <div v-if="form.relation_type" class="text-sm text-amber-800">
                     <span class="font-medium">類型：</span>
                     <span>{{
-                      form.relation_type === 'VOID_REPLACE' ? '換單（取代原始報帳）' :
-                      form.relation_type === 'CREDIT_NOTE'  ? '折讓單（原始報帳已調整淨額）' :
-                      form.relation_type === 'SUPPLEMENT'   ? '差額補足（連結至原始報帳）' :
+                      form.relation_type === 'VOID_REPLACE'      ? '換新發票' :
+                      form.relation_type === 'VOID_ORIGINAL'     ? '換新發票' :
+                      form.relation_type === 'CREDIT_NOTE'       ? '折讓單' :
+                      form.relation_type === 'SUPPLEMENT'        ? '換貨收據' :
+                      form.relation_type === 'RETURN_SUPPLEMENT' ? '換貨收據' :
                       form.relation_type
                     }}</span>
                   </div>
                   <div v-if="form.referenced_invoice_number" class="text-sm text-amber-800">
                     <span class="font-medium">參考發票：</span>
                     <span class="font-mono">{{ form.referenced_invoice_number }}</span>
-                  </div>
-                  <div v-if="form.parent_id" class="text-sm text-amber-800">
-                    <span class="font-medium">原單 ID：</span>
-                    <span class="font-mono text-xs">{{ form.parent_id }}</span>
                   </div>
                 </div>
 
