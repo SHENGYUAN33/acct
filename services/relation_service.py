@@ -170,12 +170,7 @@ def _extract_relation(
     2. 說明文字含括號發票格式 [AB-12345678] → VOID_REPLACE
     """
     for result in ocr_results:
-        if (
-            result.success
-            and result.is_voucher
-            and result.voucher_category in ("RETURN", "CREDIT_NOTE")
-            and result.original_invoice_number
-        ):
+        if result.success and result.is_voucher and result.original_invoice_number:
             return {"type": "CREDIT_NOTE", "invoice_number": result.original_invoice_number}
 
     if user_description:

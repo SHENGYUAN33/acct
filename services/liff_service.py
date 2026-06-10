@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import json
 import logging
 import re
 import shutil
@@ -418,10 +419,9 @@ async def process_session_background(
                 is_voucher=img.is_voucher if img.is_voucher is not None else False,
             ))
 
-        # 情境B：偵測到折讓單時，強制所有圖片合併為單一群組（不拆分）
+        # 情境B：偵測到折讓單（OCR 萃取到 original_invoice_number）時，強制所有圖片合併為單一群組
         has_credit_note = is_return_supplement and any(
-            r.voucher_category in ("RETURN", "CREDIT_NOTE") and r.original_invoice_number
-            for r in ocr_stubs
+            r.original_invoice_number for r in ocr_stubs
         )
 
         # 切割模式：batch = 依憑證斷點切割；single = 全部視為一群組
@@ -491,11 +491,15 @@ async def process_session_background(
                     group_id=batch_group_id,
                     skip_auto_link=is_return_supplement,
                 )
+                # 備註含「待退貨」關鍵字 → 憑證類別覆寫為 RETURN
+                if relation_service.detect_waiting_return(description):
+                    expense.voucher_categories = json.dumps(["RETURN"])
+                    db.commit()
+
                 if is_return_supplement:
-                    # 情境B：OCR 偵測到折讓單
+                    # 情境B：OCR 萃取到原始發票號碼 → 折讓單
                     credit_note_r = next(
-                        (r for r in group_ocr_stubs
-                         if r.voucher_category in ("RETURN", "CREDIT_NOTE") and r.original_invoice_number),
+                        (r for r in group_ocr_stubs if r.original_invoice_number),
                         None,
                     )
                     if credit_note_r:

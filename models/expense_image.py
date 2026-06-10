@@ -26,7 +26,8 @@ class ExpenseImage(Base):
 
     image_url: Mapped[str] = mapped_column(String(512), nullable=False)
     is_voucher: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # 憑證類型：INVOICE / RECEIPT / LABOR_FORM / DEPOSIT / RETURN / OTHER
+    # 憑證類型：INVOICE / RECEIPT / LABOR_FORM / DEPOSIT / OTHER（OCR 判定）
+    # RETURN 僅由 LIFF 待退貨標記寫入，OCR 不再產生此值
     voucher_category: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # 子類型（OCR 內部用）：HSR_TICKET / FUEL / EXEMPT_INVOICE 等
     voucher_subtype: Mapped[str | None] = mapped_column(String(64), nullable=True)

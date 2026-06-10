@@ -23,7 +23,8 @@ class VoucherOCRResult(BaseModel):
 
     # ── 分類 ────────────────────────────────────────────────────────────────
     is_voucher: bool = False
-    # 憑證類型：INVOICE / RECEIPT / LABOR_FORM / DEPOSIT / RETURN / OTHER
+    # 憑證類型：INVOICE / RECEIPT / LABOR_FORM / DEPOSIT / OTHER（OCR 判定）
+    # RETURN 僅由 LIFF 待退貨標記寫入，OCR 不再產生此值
     voucher_category: str | None = None
     # 子類型，例如 HSR_TICKET / FUEL / EXEMPT_INVOICE 等（OCR 內部用）
     voucher_subtype: str | None = None
