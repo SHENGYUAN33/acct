@@ -603,6 +603,7 @@ def _pick_primary_fields(ocr_results: list[VoucherOCRResult]) -> dict:
     # ── RECEIPT ────────────────────────────────────────────
     elif cat == "RECEIPT":
         kwargs["seller_name"] = primary.seller_name
+        kwargs["seller_tax_id"] = primary.seller_tax_id
 
     # ── LABOR_SERVICE ──────────────────────────────────────
     elif cat == "LABOR_SERVICE":

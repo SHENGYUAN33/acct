@@ -41,6 +41,7 @@ _PROMPT_TEMPLATE = """你是一個具備台灣會計知識的財務審計助理�
 
 子類型（voucher_subtype，僅 RECEIPT 適用）：
   RECEIPT   → EXEMPT_INVOICE（有「免用統一發票」圓形橡皮章）/ GENERAL（無）
+              ※ EXEMPT_INVOICE：橡皮章內通常印有賣方統一編號（8 碼數字），務必萃取至 seller_tax_id
   交通相關 RECEIPT 子類型（視覺為 POS 列印收據者）：
     PARKING        停車場 POS 列印收據
     FUEL           加油站 POS 列印收據
@@ -114,8 +115,9 @@ _PROMPT_TEMPLATE = """你是一個具備台灣會計知識的財務審計助理�
 各類型萃取欄位清單：
   INVOICE       → invoice_number, seller_name, seller_tax_id, buyer_tax_id,
                    total_amount, net_amount, tax_amount, expense_date
-  RECEIPT       → seller_name, total_amount, expense_date,
+  RECEIPT       → seller_name, seller_tax_id, total_amount, expense_date,
                    has_exempt_stamp（EXEMPT_INVOICE 子類型為 true）
+                   ※ 收據上若印有「統一編號」欄位，務必萃取至 seller_tax_id（8 碼數字）
   LABOR_SERVICE → payee_name, id_number, net_amount, tax_amount, total_amount,
                    expense_date, labor_content
   TRANSPORTATION→ expense_date, route_from, route_to, total_amount, transport_type
