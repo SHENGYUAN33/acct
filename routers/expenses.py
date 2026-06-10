@@ -132,12 +132,27 @@ def export_expenses(
     buf.write("\ufeff")
     writer = csv.writer(buf)
     writer.writerow(CSV_HEADERS)
+
+    # 重新排序：有 parent_id 的補件/折讓單緊接在原單後面
+    id_set = {e.id for e in items}
+    children_map: dict = {}
+    roots: list = []
     for e in items:
-        # REPLACED_VOID（舊資料）、VOID_ORIGINAL（換單原始單）、CREDIT_NOTE（折讓）均顯示負數
+        if e.parent_id is None or e.parent_id not in id_set:
+            roots.append(e)
+        else:
+            children_map.setdefault(e.parent_id, []).append(e)
+    ordered: list = []
+    for e in roots:
+        ordered.append(e)
+        ordered.extend(children_map.get(e.id, []))
+
+    for e in ordered:
+        # REPLACED_VOID（舊資料）、VOID_ORIGINAL（換單原始單）均顯示負數
+        # CREDIT_NOTE 的 total_amount OCR 已強制為負數，不再乘以 -1
         is_void = (
             e.status == ExpenseStatus.REPLACED_VOID
             or e.relation_type == "VOID_ORIGINAL"
-            or e.relation_type == "CREDIT_NOTE"
         )
         sign = Decimal("-1") if is_void else Decimal("1")
 
@@ -177,13 +192,12 @@ def export_expenses(
 
     # ── 費用科目加總 ──────────────────────────────────────────
     category_totals: dict[str, Decimal] = {}
-    for e in items:
+    for e in ordered:
         if e.total_amount is None:
             continue
         is_void_sum = (
             e.status == ExpenseStatus.REPLACED_VOID
             or e.relation_type == "VOID_ORIGINAL"
-            or e.relation_type == "CREDIT_NOTE"
         )
         amt = e.total_amount * (Decimal("-1") if is_void_sum else Decimal("1"))
         cats: list[str] = json.loads(e.expense_categories or "[]")
