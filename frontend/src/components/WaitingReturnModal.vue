@@ -607,9 +607,6 @@ async function unlinkSupplement(supplement, invoice) {
                   <span class="ml-auto text-[10px] bg-teal-100 text-teal-600 px-1.5 py-0.5 rounded shrink-0">加入</span>
                 </div>
               </div>
-              <p v-else-if="leftAddQuery && !isLeftAdding" class="text-[10px] text-gray-400 text-center py-1.5">
-                未找到符合的費用
-              </p>
             </div>
           </div>
 
@@ -618,7 +615,7 @@ async function unlinkSupplement(supplement, invoice) {
             <div v-if="filteredCases.length === 0"
               class="flex flex-col items-center justify-center h-full text-gray-300 text-xs gap-2 pb-8">
               <PackageX :size="32" class="opacity-30" />
-              <span v-if="leftActiveCount > 0" class="text-gray-400 text-sm font-medium">無符合篩選條件的案件</span>
+              <span v-if="leftActiveCount > 0" class="text-gray-400 text-sm font-medium">未找到符合的費用</span>
               <span v-else class="text-gray-400 text-sm font-medium">目前無待退貨案件</span>
               <span v-if="leftActiveCount === 0" class="text-gray-300">備註含「待退貨」的報帳會顯示於此</span>
             </div>
@@ -877,9 +874,6 @@ async function unlinkSupplement(supplement, invoice) {
                   <span class="ml-auto text-[10px] bg-teal-100 text-teal-600 px-1.5 py-0.5 rounded shrink-0">加入</span>
                 </div>
               </div>
-              <p v-else-if="rightAddQuery && !isRightAdding" class="text-[10px] text-gray-400 text-center py-1.5">
-                未找到符合的費用
-              </p>
             </div>
 
             <!-- 右欄篩選 Popover -->
@@ -938,7 +932,7 @@ async function unlinkSupplement(supplement, invoice) {
             <div v-if="filteredOrphanSupplements.length === 0"
               class="flex flex-col items-center justify-center h-full text-gray-300 text-xs gap-2">
               <PackageX :size="28" class="opacity-40" />
-              <span v-if="rightActiveCount > 0">無符合篩選條件的補件</span>
+              <span v-if="rightActiveCount > 0">未找到符合的費用</span>
               <span v-else>目前無孤立補件</span>
             </div>
 
