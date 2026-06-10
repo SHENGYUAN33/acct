@@ -59,6 +59,7 @@ def create_roster_entry(
     email: str | None = None,
     is_petty_cash_target: bool = False,
     bank_account: str | None = None,
+    job_title: str | None = None,
 ) -> StaffRoster:
     """新增單筆員工至名冊。"""
     entry = StaffRoster(
@@ -70,6 +71,7 @@ def create_roster_entry(
         email=email or None,
         is_petty_cash_target=is_petty_cash_target,
         bank_account=bank_account or None,
+        job_title=job_title or None,
     )
     db.add(entry)
     db.commit()
@@ -89,6 +91,7 @@ def update_roster_entry(
     email: object = _UNSET,
     is_petty_cash_target: object = _UNSET,
     bank_account: object = _UNSET,
+    job_title: object = _UNSET,
 ) -> StaffRoster | None:
     """修改員工名冊資料（只更新有傳入的欄位）。
 
@@ -114,6 +117,8 @@ def update_roster_entry(
         entry.is_petty_cash_target = is_petty_cash_target  # type: ignore[assignment]
     if bank_account is not _UNSET:
         entry.bank_account = bank_account  # type: ignore[assignment]
+    if job_title is not _UNSET:
+        entry.job_title = job_title  # type: ignore[assignment]
 
     db.commit()
     db.refresh(entry)
@@ -213,9 +218,30 @@ def unbind_roster_entry(db: Session, roster_id: UUID) -> StaffRoster | None:
     return entry
 
 
+_HEADER_ALIASES: dict[str, str] = {
+    "姓名": "name",
+    "line名稱": "line_name",
+    "line id": "line_id",
+    "組別": "department",
+    "職稱": "job_title",
+    "email": "email",
+    "帳號權限": "account_role",
+    "匯款零用金": "is_petty_cash_target",
+    "匯款帳號": "bank_account",
+}
+
+
+def _normalize_row(row: dict) -> dict:
+    """將中文或大小寫不一致的欄位名統一轉為英文 key。"""
+    return {
+        _HEADER_ALIASES.get(k.strip().lower(), k.strip()): v
+        for k, v in row.items()
+    }
+
+
 def _parse_bool(value: str) -> bool:
-    """CSV 布林值解析：true / 1 / yes → True，其餘 → False。"""
-    return value.strip().lower() in {"true", "1", "yes"}
+    """CSV 布林值解析：true / 1 / yes / 是 → True，其餘 → False。"""
+    return value.strip().lower() in {"true", "1", "yes", "是"}
 
 
 def _get_roster_by_name(db: Session, name: str) -> StaffRoster | None:
@@ -238,6 +264,7 @@ def import_from_csv(db: Session, csv_content: str) -> dict:
     reader = csv.DictReader(io.StringIO(csv_content))
     for row_index, row in enumerate(reader, start=2):
         try:
+            row = _normalize_row(row)
             name = (row.get("name") or "").strip()
             department = (row.get("department") or "").strip()
             line_id = (row.get("line_id") or "").strip() or None
@@ -246,6 +273,7 @@ def import_from_csv(db: Session, csv_content: str) -> dict:
             email = (row.get("email") or "").strip() or None
             is_petty_cash_target = _parse_bool(row.get("is_petty_cash_target") or "")
             bank_account = (row.get("bank_account") or "").strip() or None
+            job_title = (row.get("job_title") or "").strip() or None
 
             if not name:
                 errors.append({"row": row_index, "reason": "name 欄位不可為空"})
@@ -263,6 +291,7 @@ def import_from_csv(db: Session, csv_content: str) -> dict:
                 existing.email = email
                 existing.is_petty_cash_target = is_petty_cash_target
                 existing.bank_account = bank_account
+                existing.job_title = job_title
                 db.commit()
                 updated += 1
                 logger.info("import_from_csv: updated name=%s row=%d", name, row_index)
@@ -277,6 +306,7 @@ def import_from_csv(db: Session, csv_content: str) -> dict:
                 email=email,
                 is_petty_cash_target=is_petty_cash_target,
                 bank_account=bank_account,
+                job_title=job_title,
             )
             db.add(entry)
             db.commit()

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Plus, Upload, FileDown, Download, Loader2, Pencil, Trash2, Link2Off } from 'lucide-vue-next'
+import { Plus, Upload, Download, Loader2, Pencil, Trash2, Link2Off, CheckCircle2, XCircle } from 'lucide-vue-next'
 import ConfirmModal from '../components/ConfirmModal.vue'
 import {
   getRosterList,
@@ -9,7 +9,6 @@ import {
   deleteRosterEntry,
   importRosterCSV,
   unbindRosterEntry,
-  downloadRosterTemplate,
   exportRosterCSV,
 } from '../api/rosterApi'
 import { fetchDepartments, fetchAccountRoles } from '../api/configApi'
@@ -52,6 +51,7 @@ const emptyForm = () => ({
   email: '',
   is_petty_cash_target: false,
   bank_account: '',
+  job_title: '',
 })
 const form = ref(emptyForm())
 const formError = ref('')
@@ -150,6 +150,7 @@ function openEditModal(entry) {
     email: entry.email || '',
     is_petty_cash_target: entry.is_petty_cash_target ?? false,
     bank_account: entry.bank_account || '',
+    job_title: entry.job_title || '',
   }
   formError.value = ''
   showFormModal.value = true
@@ -180,6 +181,7 @@ async function handleSave() {
       email: form.value.email.trim() || null,
       is_petty_cash_target: form.value.is_petty_cash_target,
       bank_account: form.value.bank_account.trim() || null,
+      job_title: form.value.job_title.trim() || null,
     }
 
     if (isEditMode.value) {
@@ -379,14 +381,6 @@ onMounted(async () => {
         {{ isExporting ? '匯出中...' : '匯出 CSV' }}
       </button>
 
-      <button
-        @click="downloadRosterTemplate"
-        class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-400 rounded-full text-sm text-gray-600 hover:bg-gray-100 transition-colors"
-      >
-        <FileDown :size="14" />
-        下載樣板
-      </button>
-
       <!-- 右側篩選按鈕組 -->
       <div class="ml-auto flex items-center gap-1 bg-gray-100 rounded-full p-0.5">
         <button
@@ -427,9 +421,10 @@ onMounted(async () => {
               <tr class="bg-gray-50 border-b border-gray-200 text-left text-xs text-gray-500 uppercase tracking-wide">
                 <th class="px-3 py-2.5 font-medium w-10 text-center">#</th>
                 <th class="px-4 py-2.5 font-medium">姓名</th>
-                <th class="px-4 py-2.5 font-medium">組別</th>
-                <th class="px-4 py-2.5 font-medium">LINE ID</th>
                 <th class="px-4 py-2.5 font-medium">LINE 名稱</th>
+                <th class="px-4 py-2.5 font-medium">LINE ID</th>
+                <th class="px-4 py-2.5 font-medium">組別</th>
+                <th class="px-4 py-2.5 font-medium">職稱</th>
                 <th class="px-4 py-2.5 font-medium">Email</th>
                 <th class="px-4 py-2.5 font-medium">帳號權限</th>
                 <th class="px-4 py-2.5 font-medium text-center">匯款零用金</th>
@@ -447,9 +442,10 @@ onMounted(async () => {
               >
                 <td class="px-3 py-3 text-center text-xs text-gray-400 tabular-nums">{{ currentPage * pageSize + idx + 1 }}</td>
                 <td class="px-4 py-3 font-medium text-gray-800">{{ entry.name }}</td>
-                <td class="px-4 py-3 text-gray-600">{{ entry.department || '—' }}</td>
-                <td class="px-4 py-3 text-gray-500 font-mono text-xs">{{ entry.line_id || '—' }}</td>
                 <td class="px-4 py-3 text-gray-600">{{ entry.line_name || '—' }}</td>
+                <td class="px-4 py-3 text-gray-500 font-mono text-xs">{{ entry.line_id || '—' }}</td>
+                <td class="px-4 py-3 text-gray-600">{{ entry.department || '—' }}</td>
+                <td class="px-4 py-3 text-gray-600">{{ entry.job_title || '—' }}</td>
                 <td class="px-4 py-3 text-gray-500 text-xs">{{ entry.email || '—' }}</td>
                 <td class="px-4 py-3 text-gray-600">{{ entry.account_role || '—' }}</td>
                 <td class="px-4 py-3 text-center">
@@ -600,6 +596,20 @@ onMounted(async () => {
                 </select>
               </div>
 
+              <!-- 職稱 -->
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">
+                  職稱
+                  <span class="text-gray-400 font-normal text-xs ml-1">（選填）</span>
+                </label>
+                <input
+                  v-model="form.job_title"
+                  type="text"
+                  placeholder="例：行政專員、攝影師"
+                  class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                />
+              </div>
+
               <!-- LINE ID -->
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">
@@ -741,50 +751,75 @@ onMounted(async () => {
           role="dialog"
         >
           <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="showImportResult = false" />
-          <div class="relative bg-white rounded-xl shadow-xl p-6 w-full max-w-lg mx-4">
-            <h3 class="text-gray-900 font-semibold text-lg mb-4">CSV 匯入結果</h3>
 
-            <div class="flex gap-4 mb-4">
-              <div class="flex-1 bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-center">
-                <div class="text-xl font-bold text-green-700">{{ importResultData.created }}</div>
-                <div class="text-xs text-green-600 mt-0.5">新增</div>
-              </div>
-              <div class="flex-1 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-center">
-                <div class="text-xl font-bold text-blue-700">{{ importResultData.updated }}</div>
-                <div class="text-xs text-blue-600 mt-0.5">更新</div>
-              </div>
-              <div class="flex-1 rounded-lg px-3 py-2 text-center"
-                :class="importResultData.errors.length > 0
-                  ? 'bg-red-50 border border-red-200'
-                  : 'bg-gray-50 border border-gray-200'"
+          <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+
+            <!-- 頂部色帶 -->
+            <div
+              class="h-1.5 w-full"
+              :class="importResultData.errors.length > 0 ? 'bg-red-400' : 'bg-green-400'"
+            />
+
+            <!-- 主體 -->
+            <div class="px-8 pt-8 pb-6 flex flex-col items-center text-center">
+
+              <!-- 圖示 -->
+              <div
+                class="w-16 h-16 rounded-full flex items-center justify-center mb-4"
+                :class="importResultData.errors.length > 0 ? 'bg-red-50' : 'bg-green-50'"
               >
-                <div class="text-xl font-bold"
-                  :class="importResultData.errors.length > 0 ? 'text-red-600' : 'text-gray-400'"
-                >{{ importResultData.errors.length }}</div>
-                <div class="text-xs mt-0.5"
-                  :class="importResultData.errors.length > 0 ? 'text-red-500' : 'text-gray-400'"
-                >錯誤</div>
+                <CheckCircle2
+                  v-if="importResultData.errors.length === 0"
+                  :size="36"
+                  class="text-green-500"
+                  :stroke-width="1.5"
+                />
+                <XCircle
+                  v-else
+                  :size="36"
+                  class="text-red-400"
+                  :stroke-width="1.5"
+                />
               </div>
-            </div>
 
-            <div v-if="importResultData.errors.length > 0">
-              <p class="text-sm font-medium text-red-600 mb-2">錯誤明細：</p>
-              <ul class="max-h-48 overflow-y-auto space-y-1 border border-red-100 rounded-lg p-2 bg-red-50">
+              <!-- 標題 -->
+              <p
+                class="text-xl font-semibold tracking-tight mb-1"
+                :class="importResultData.errors.length > 0 ? 'text-red-600' : 'text-gray-800'"
+              >
+                {{ importResultData.errors.length > 0 ? '匯入失敗' : '匯入成功' }}
+              </p>
+
+              <!-- 副標 -->
+              <p class="text-sm text-gray-400 mb-5">
+                {{ importResultData.errors.length > 0
+                  ? `共 ${importResultData.errors.length} 筆資料發生錯誤`
+                  : `已成功匯入 ${importResultData.created + importResultData.updated} 筆員工資料`
+                }}
+              </p>
+
+              <!-- 錯誤明細 -->
+              <ul
+                v-if="importResultData.errors.length > 0"
+                class="w-full max-h-44 overflow-y-auto text-left space-y-1.5 bg-red-50 border border-red-100 rounded-xl p-3 mb-5"
+              >
                 <li
                   v-for="err in importResultData.errors"
                   :key="err.row"
-                  class="text-xs text-red-700 flex gap-2"
+                  class="flex items-start gap-2 text-xs text-red-700"
                 >
-                  <span class="font-mono text-red-400 shrink-0">第 {{ err.row }} 行</span>
-                  <span>{{ err.reason }}</span>
+                  <span class="shrink-0 font-mono bg-red-100 text-red-500 rounded px-1 py-0.5">第 {{ err.row }} 行</span>
+                  <span class="pt-0.5">{{ err.reason }}</span>
                 </li>
               </ul>
-            </div>
 
-            <div class="mt-5 flex justify-end">
+              <!-- 確認按鈕 -->
               <button
                 @click="showImportResult = false"
-                class="px-4 py-2 rounded-lg bg-gray-900 hover:bg-gray-700 text-white text-sm font-medium transition-colors"
+                class="w-full py-2.5 rounded-xl text-sm font-medium transition-colors"
+                :class="importResultData.errors.length > 0
+                  ? 'bg-red-500 hover:bg-red-600 text-white'
+                  : 'bg-green-500 hover:bg-green-600 text-white'"
               >
                 確認
               </button>

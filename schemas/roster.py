@@ -17,6 +17,7 @@ class RosterCreate(BaseModel):
     email: str | None = None
     is_petty_cash_target: bool = False
     bank_account: str | None = None
+    job_title: str | None = None
 
 
 class RosterUpdate(BaseModel):
@@ -28,6 +29,7 @@ class RosterUpdate(BaseModel):
     email: str | None = None
     is_petty_cash_target: bool | None = None
     bank_account: str | None = None
+    job_title: str | None = None
 
 
 class RosterRead(BaseModel):
@@ -40,6 +42,7 @@ class RosterRead(BaseModel):
     email: str | None
     is_petty_cash_target: bool
     bank_account: str | None
+    job_title: str | None
     line_user_id: str | None
     is_bound: bool
     bound_at: datetime | None

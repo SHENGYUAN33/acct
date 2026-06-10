@@ -19,6 +19,7 @@ class StaffRoster(Base):
     line_name = Column(String(128), nullable=True)                                      # LINE 顯示名稱
     email = Column(String(255), nullable=True)                                          # 電子郵件
     is_petty_cash_target = Column(Boolean, default=False, nullable=False)               # 公司匯款零用金對象
+    job_title = Column(String(100), nullable=True)                                       # 職稱
     bank_account = Column(String(100), nullable=True)                                   # 匯款帳號
     line_user_id = Column(String(100), unique=True, nullable=True)                      # LINE 內部 UID（綁定後自動填入）
     is_bound = Column(Boolean, default=False, nullable=False)                           # 是否已完成綁定

@@ -73,9 +73,9 @@ export const exportRosterCSV = async () => {
  */
 export const downloadRosterTemplate = () => {
   const content = [
-    'name,department,line_id,account_role,line_name,email,is_petty_cash_target,bank_account',
-    '王小明,製片組,,一般員工,王小明LINE,wangxm@example.com,false,',
-    '李小華,攝影組,,管理員,,lixh@example.com,true,123456789',
+    'name,department,line_id,account_role,line_name,email,is_petty_cash_target,bank_account,job_title',
+    '王小明,製片組,,一般員工,王小明LINE,wangxm@example.com,false,,攝影師',
+    '李小華,攝影組,,管理員,,lixh@example.com,true,123456789,',
   ].join('\n')
 
   // 加 BOM 確保 Excel 正確顯示中文

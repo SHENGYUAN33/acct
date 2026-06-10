@@ -68,6 +68,7 @@ def create_roster(
         email=body.email,
         is_petty_cash_target=body.is_petty_cash_target,
         bank_account=body.bank_account,
+        job_title=body.job_title,
     )
     return ok(data=RosterRead.model_validate(entry).model_dump(), message="新增成功")
 
@@ -87,18 +88,27 @@ def export_roster_csv(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["name", "department", "line_id", "account_role",
-                     "line_name", "email", "is_petty_cash_target", "bank_account"])
+    writer.writerow([
+        "姓名", "LINE名稱", "LINE ID", "組別", "職稱",
+        "Email", "帳號權限", "匯款零用金", "匯款帳號", "綁定狀態", "綁定時間",
+    ])
     for item in items:
+        if item.bound_at:
+            bound_str = item.bound_at.strftime("%Y-%m-%d %H:%M")
+        else:
+            bound_str = ""
         writer.writerow([
             item.name,
-            item.department,
-            item.line_id or "",
-            item.account_role or "",
             item.line_name or "",
+            item.line_id or "",
+            item.department,
+            item.job_title or "",
             item.email or "",
-            "true" if item.is_petty_cash_target else "false",
+            item.account_role or "",
+            "是" if item.is_petty_cash_target else "否",
             item.bank_account or "",
+            "已綁定" if item.is_bound else "未綁定",
+            bound_str,
         ])
 
     bom = "﻿"
@@ -154,7 +164,7 @@ def update_roster(
     """
     kwargs: dict = {}
     for field in ("name", "department", "line_id", "account_role", "line_name", "email",
-                  "is_petty_cash_target", "bank_account"):
+                  "is_petty_cash_target", "bank_account", "job_title"):
         if field in body.model_fields_set:
             kwargs[field] = getattr(body, field)
 
