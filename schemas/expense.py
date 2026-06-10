@@ -104,6 +104,7 @@ class ExpenseUpdate(BaseModel):
     void_reason: str | None = None
     referenced_invoice_number: str | None = None
     dismissed_from_waiting_return: bool | None = None
+    voucher_categories: str | None = None
 
 
 class ExpenseCreate(BaseModel):

@@ -218,8 +218,10 @@ async function searchForRightAdd() {
 
 async function addToRightPanel(expense) {
   const relationType = autoDetectRelationType(expense)
+  const payload = { relation_type: relationType, dismissed_from_waiting_return: false }
+  if (['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE'].includes(relationType)) payload.voucher_categories = JSON.stringify(['RETURN'])
   try {
-    await updateExpense(expense.id, { relation_type: relationType, dismissed_from_waiting_return: false })
+    await updateExpense(expense.id, payload)
     rightAddQuery.value = ''
     rightAddResults.value = []
     showRightAdd.value = false
@@ -988,10 +990,7 @@ async function unlinkSupplement(supplement, invoice) {
               </div>
 
               <!-- 備註 -->
-              <div class="mb-1.5 space-y-0.5">
-                <p v-if="sup.item_description" class="text-[10px] text-gray-500 truncate" :title="sup.item_description">
-                  {{ sup.item_description }}
-                </p>
+              <div class="mb-1.5">
                 <p class="text-[10px] rounded px-1.5 py-1"
                   :class="sup.user_description ? 'bg-amber-50 text-amber-700' : 'text-gray-300 italic'"
                   :title="sup.user_description || ''">

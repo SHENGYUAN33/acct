@@ -493,8 +493,14 @@ async def process_session_background(
                 )
                 if is_return_supplement:
                     # 情境B：OCR 偵測到折讓單
-                    if any(r.voucher_category in ("RETURN", "CREDIT_NOTE") and r.original_invoice_number for r in group_ocr_stubs):
+                    credit_note_r = next(
+                        (r for r in group_ocr_stubs
+                         if r.voucher_category in ("RETURN", "CREDIT_NOTE") and r.original_invoice_number),
+                        None,
+                    )
+                    if credit_note_r:
                         expense.relation_type = "CREDIT_NOTE"
+                        expense.referenced_invoice_number = credit_note_r.original_invoice_number
                     # 情境A：使用者填了舊發票號碼
                     elif wr_original_invoice:
                         expense.relation_type = "VOID_REPLACE"
