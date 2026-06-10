@@ -32,28 +32,20 @@ _PROMPT_TEMPLATE = """你是一個具備台灣會計知識的財務審計助理�
 
 ━━ 步驟 1A：憑證類型（voucher_category）━━
   INVOICE    → 印有「統一發票」字樣，有字軌號碼（如 AB-12345678）
-  RECEIPT    → 收據、收銀紙、手寫收據（無統一發票字軌）
+  RECEIPT    → 視覺上為傳統收據格式：POS 收銀機列印或手寫收據（賣方名稱＋品項＋金額）；無統一發票字軌
+              範例：超商收據、餐廳收據、加油站 POS 收據、停車場 POS 收據、文具店收據
+              **不包含**：票根、票券、對帳單、帳單、政府公文、截圖、保險文件、銀行文件、醫療收據、證明文件
   LABOR_FORM → 勞務報酬單；含手寫金額＋身分證字號＋收款人簽章
   DEPOSIT    → 押金收據、訂金收據
   RETURN     → 退貨折讓證明、折讓單，或含「折讓」、負數金額的單據（含換貨收據、換新發票補件）
   OTHER      → 無法歸入以上任何類型
 
-子類型（voucher_subtype，僅 RECEIPT 與 INVOICE 適用）：
+子類型（voucher_subtype，僅 RECEIPT 適用）：
   RECEIPT   → EXEMPT_INVOICE（有「免用統一發票」圓形橡皮章）/ GENERAL（無）
-  交通相關收據（voucher_category=RECEIPT）子類型：
-    HSR_TICKET     高鐵票根（實體票/電子票/優惠票）
-    HSR_RECORD     高鐵 App 乘車記錄截圖
-    HSR_SUPPLEMENT 高鐵補票收據
-    TAIWAN_RAILWAY 台灣鐵路票根
-    BUS            客運車票或收據
-    CHARTER_BUS    遊覽車包車收據或合約
-    TAXI           計程車收據
-    PARKING        停車場收據
-    TOLL_ETC       ETC 收據或過路費收據
-    FUEL           加油站收據
-    FINE           交通罰單
-    UBER           Uber 行程收據
-    GENERAL        捷運票、其他交通單據
+  交通相關 RECEIPT 子類型（視覺為 POS 列印收據者）：
+    PARKING        停車場 POS 列印收據
+    FUEL           加油站 POS 列印收據
+  OTHER 的 voucher_subtype 一律填 null
   其餘類型 voucher_subtype 填 null
 
 ━━ 步驟 1B：費用科目（expense_category）━━
@@ -64,12 +56,15 @@ _PROMPT_TEMPLATE = """你是一個具備台灣會計知識的財務審計助理�
   **重要：若無法判斷，expense_category 填「勞-現場拍攝用品購買」**
 
 場景推理範例：
-  - 「店名含『中油、台塑石化、全國加油』→ 加油站 → voucher_category=RECEIPT, expense_category=勞-交通費-油資」
-  - 「品項含飯、便當、套餐 → 餐廳 → expense_category=勞-餐飲費」
-  - 「版面含 Check-in/Check-out 日期與房號 → 飯店 → voucher_category=RECEIPT, expense_category=勞-住宿費」
+  - 「店名含『中油、台塑石化、全國加油』+ POS 列印格式 → 加油站收據 → voucher_category=RECEIPT, voucher_subtype=FUEL, expense_category=勞-交通費-油資」
+  - 「品項含飯、便當、套餐 → 餐廳收據 → voucher_category=RECEIPT, expense_category=勞-餐飲費」
+  - 「版面含 Check-in/Check-out 日期與房號 → 飯店帳單，帳單格式非收據 → voucher_category=OTHER, expense_category=勞-住宿費」
   - 「有買方統一編號已填入 → B2B 公司採購發票 → voucher_category=INVOICE」
   - 「手寫金額＋身分證字號＋收款人簽章 → 勞報單 → voucher_category=LABOR_FORM, expense_category=勞-勞務費」
-  - 「台電格式帳單 + 用電度數 → voucher_category=RECEIPT, expense_category=勞-水電瓦斯費」
+  - 「台電/中華電信格式帳單，含帳單期間與用量明細 → 帳單格式非收據 → voucher_category=OTHER, expense_category=勞-水電瓦斯費 或 勞-電信/網路費」
+  - 「台灣高鐵票根，含車次/座位/起訖站 → 票券非收據 → voucher_category=OTHER, expense_category=勞-交通費-高鐵、台鐵、客運、遊覽車」
+  - 「遠通電收/ETC 通行費明細紀錄，含多筆通行時間與路段 → 對帳單格式非收據 → voucher_category=OTHER, expense_category=勞-交通費-過路費」
+  - 「計程車運價證明（政府制式表格，手寫車資/車號/駕駛人）→ 證明文件格式非收據 → voucher_category=OTHER, expense_category=勞-交通費-計程車資」
   - 「文具四件、A4 影印紙 → expense_category=勞-文具用品」
   - 「五金行收據、商品名稱不明 → 無法確定部門 → expense_category=勞-現場拍攝用品購買」
 
@@ -120,7 +115,7 @@ _PROMPT_TEMPLATE = """你是一個具備台灣會計知識的財務審計助理�
 各類型萃取欄位清單：
   INVOICE       → invoice_number, seller_name, seller_tax_id, buyer_tax_id,
                    total_amount, net_amount, tax_amount, expense_date
-  RECEIPT       → seller_name, total_amount, expense_date, item_description,
+  RECEIPT       → seller_name, total_amount, expense_date,
                    has_exempt_stamp（EXEMPT_INVOICE 子類型為 true）
   LABOR_SERVICE → payee_name, id_number, net_amount, tax_amount, total_amount,
                    expense_date, labor_content

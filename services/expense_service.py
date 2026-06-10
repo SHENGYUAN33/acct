@@ -8,7 +8,7 @@ from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import or_, select, func, text, nullslast
+from sqlalchemy import or_, select, func, text, nullslast, nullsfirst
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -209,7 +209,7 @@ def list_expenses(
     voucher_category_q：憑證類別篩選（比對 voucher_categories JSON 字串）。
     """
     stmt = select(Expense).order_by(
-        nullslast(Expense.display_order),
+        nullsfirst(Expense.display_order),
         Expense.created_at.desc()
     )
 
@@ -603,46 +603,10 @@ def _pick_primary_fields(ocr_results: list[VoucherOCRResult]) -> dict:
     # ── RECEIPT ────────────────────────────────────────────
     elif cat == "RECEIPT":
         kwargs["seller_name"] = primary.seller_name
-        kwargs["item_description"] = primary.item_description
 
     # ── LABOR_SERVICE ──────────────────────────────────────
     elif cat == "LABOR_SERVICE":
-        kwargs["item_description"] = primary.labor_content
-
-    # ── INSURANCE ──────────────────────────────────────────
-    elif cat == "INSURANCE":
-        kwargs["seller_name"] = primary.insurer_name
-        kwargs["item_description"] = primary.insurance_type
-
-    # ── UTILITY ────────────────────────────────────────────
-    elif cat == "UTILITY":
-        kwargs["seller_name"] = primary.seller_name
-        kwargs["item_description"] = primary.billing_period
-
-    # ── RENTAL ─────────────────────────────────────────────
-    elif cat == "RENTAL":
-        kwargs["seller_name"] = primary.landlord_name
-        kwargs["item_description"] = primary.rental_subtype
-
-    # ── ACCOMMODATION ──────────────────────────────────────
-    elif cat == "ACCOMMODATION":
-        kwargs["seller_name"] = primary.hotel_name
-        kwargs["item_description"] = (
-            f"{primary.check_in_date} ~ {primary.check_out_date}"
-            if primary.check_in_date and primary.check_out_date
-            else primary.check_in_date or primary.check_out_date
-        )
-
-    # ── POSTAGE ────────────────────────────────────────────
-    elif cat == "POSTAGE":
-        kwargs["item_description"] = primary.postage_type
-
-    # ── TRANSPORTATION ─────────────────────────────────────
-    elif cat == "TRANSPORTATION":
-        if primary.route_from and primary.route_to:
-            kwargs["item_description"] = f"{primary.route_from} → {primary.route_to}"
-        elif primary.route_from or primary.route_to:
-            kwargs["item_description"] = primary.route_from or primary.route_to
+        kwargs["seller_name"] = primary.payee_name
 
     return {k: v for k, v in kwargs.items() if v is not None}
 
@@ -822,10 +786,8 @@ def create_batch_expense(
             item_images.append(path_str)
 
     # ── 6. INSERT Expense（含重試機制）────────────────────────────
-    ocr_item_description: str | None = primary_fields.get("item_description")
     effective_item_description: str | None = (
-        user_description.strip() if user_description and user_description.strip()
-        else ocr_item_description
+        user_description.strip() if user_description and user_description.strip() else None
     )
 
     for _attempt in range(5):
