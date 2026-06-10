@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, watchEffect, onMounted } from 'vue'
 import { useExpenseStore } from '../stores/expenseStore'
 import { getExpense, fetchExpenses, fetchRelatedExpenses, resolveDuplicate, updateExpense as apiUpdateExpense } from '../api/expenseApi'
 import { fetchVoucherCategories } from '../api/configApi'
@@ -213,6 +213,25 @@ const visibleExpenses = computed(() =>
   ).map(e => addExpenseCategoryDisplay(e))
 )
 
+// 自動預載有子補件的父憑證：不依賴 status，直接從 store.expenses 找哪些有 parent_id 的補件，
+// 反查其父憑證 ID，這樣不論父憑證狀態是 WAITING_RETURN 或 PENDING（已完成交換）都能正確預載。
+// store.expenses、supplementCache、visibleExpenses 任一變化都會重新觸發。
+watchEffect(async () => {
+  const cache = supplementCache.value  // 追蹤 cache 為依賴（主 watch 清空後會重跑）
+  const pairedParentIds = new Set(
+    (store.expenses ?? []).filter(e => e.parent_id).map(e => e.parent_id)
+  )
+  const toFetch = visibleExpenses.value.filter(e => pairedParentIds.has(e.id) && !(e.id in cache))
+  if (toFetch.length === 0) return
+  await Promise.all(toFetch.map(async (expense) => {
+    try {
+      const res = await fetchRelatedExpenses(expense.id)
+      const items = res.data?.data ?? []
+      supplementCache.value[expense.id] = items.map(normalizeImageUrls)
+    } catch { }
+  }))
+})
+
 function addExpenseCategoryDisplay(exp) {
   const raw = exp.expense_categories
   const parsed = raw
@@ -392,7 +411,7 @@ async function handleUnlinkSupplement(parentExpense, sup) {
                   :class="{ 'rotate-90': expandedRows.has(expense.id) }"
                   :title="expense.relation_type === 'VOID_REPLACE' ? '展開查看被取代的原單' : '展開細節'"
                 >
-                  <Link2 v-if="expense.relation_type === 'VOID_REPLACE' || expense.relation_type === 'CREDIT_NOTE'" :size="14" class="text-red-400" />
+                  <Link2 v-if="(expense.relation_type === 'VOID_REPLACE' || expense.relation_type === 'CREDIT_NOTE') && expense.parent_id" :size="14" class="text-red-400" />
                   <ChevronRight v-else :size="14" />
                 </button>
               </td>
