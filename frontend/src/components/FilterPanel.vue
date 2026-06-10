@@ -64,9 +64,20 @@ watch(() => store.filters.dateFrom, (v) => { localDateFrom.value = v })
 watch(() => store.filters.dateTo,   (v) => { localDateTo.value = v })
 watch(() => store.filters.q,        (v) => { localQ.value = v })
 
+// 前日改變時，若後日比前日早則清空後日
+watch(localDateFrom, (v) => {
+  if (v && localDateTo.value && localDateTo.value < v) {
+    localDateTo.value = ''
+  }
+})
+
 // ── 動作 ────────────────────────────────────────────────────────
 
 function applyDateRange() {
+  // 後日不得早於前日（手動輸入防護）
+  if (localDateFrom.value && localDateTo.value && localDateTo.value < localDateFrom.value) {
+    localDateTo.value = ''
+  }
   store.setFilter('dateFrom', localDateFrom.value)
   store.setFilter('dateTo', localDateTo.value)
   store.fetchExpenses()
@@ -78,6 +89,19 @@ function applySearch() {
 
 function onSearchKeydown(e) {
   if (e.key === 'Enter') applySearch()
+}
+
+function clearDateRange() {
+  localDateFrom.value = ''
+  localDateTo.value = ''
+  store.setFilter('dateFrom', '')
+  store.setFilter('dateTo', '')
+  store.fetchExpenses()
+}
+
+function clearSearch() {
+  localQ.value = ''
+  store.setFilterAndFetch('q', '')
 }
 
 function clearAll() {
@@ -92,6 +116,12 @@ const hasActiveFilters = computed(() =>
   !!(store.filters.status || store.filters.dept || store.filters.category ||
      store.filters.dateFrom || store.filters.dateTo || store.filters.q)
 )
+
+const activeFilterCount = computed(() =>
+  [store.filters.status, store.filters.dept, store.filters.category,
+   store.filters.dateFrom || store.filters.dateTo, store.filters.q]
+    .filter(Boolean).length
+)
 </script>
 
 <template>
@@ -105,6 +135,10 @@ const hasActiveFilters = computed(() =>
         <div class="flex items-center gap-2">
           <SlidersHorizontal :size="14" class="text-gray-500" />
           <span class="text-sm font-medium text-gray-600">篩選條件</span>
+          <span
+            v-if="activeFilterCount > 0"
+            class="inline-flex items-center justify-center w-5 h-5 bg-blue-500 text-white rounded-full text-[10px] font-bold"
+          >{{ activeFilterCount }}</span>
           <button
             v-if="hasActiveFilters"
             @click="clearAll"
@@ -160,6 +194,7 @@ const hasActiveFilters = computed(() =>
             <input
               v-model="localDateFrom"
               type="date"
+              :max="localDateTo || undefined"
               class="border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-700 w-36"
               :class="localDateFrom ? 'border-blue-400' : ''"
             />
@@ -167,6 +202,7 @@ const hasActiveFilters = computed(() =>
             <input
               v-model="localDateTo"
               type="date"
+              :min="localDateFrom || undefined"
               class="border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-700 w-36"
               :class="localDateTo ? 'border-blue-400' : ''"
             />
@@ -201,6 +237,45 @@ const hasActiveFilters = computed(() =>
               搜尋
             </button>
           </div>
+        </div>
+
+        <!-- 已套用條件 chips -->
+        <div v-if="hasActiveFilters" class="flex flex-wrap gap-1.5 pt-1 border-t border-gray-100">
+          <span
+            v-if="store.filters.status"
+            class="inline-flex items-center gap-0.5 px-2 py-0.5 bg-blue-50 border border-blue-200 text-blue-700 text-xs rounded-full"
+          >
+            {{ statusOptions.find(o => o.value === store.filters.status)?.label }}
+            <button @click="statusModel = ''" class="ml-0.5 hover:text-blue-900 leading-none">×</button>
+          </span>
+          <span
+            v-if="store.filters.dept"
+            class="inline-flex items-center gap-0.5 px-2 py-0.5 bg-blue-50 border border-blue-200 text-blue-700 text-xs rounded-full"
+          >
+            {{ store.filters.dept }}
+            <button @click="deptModel = ''" class="ml-0.5 hover:text-blue-900 leading-none">×</button>
+          </span>
+          <span
+            v-if="store.filters.category"
+            class="inline-flex items-center gap-0.5 px-2 py-0.5 bg-blue-50 border border-blue-200 text-blue-700 text-xs rounded-full"
+          >
+            {{ categoryOptions.find(o => o.value === store.filters.category)?.label ?? store.filters.category }}
+            <button @click="categoryModel = ''" class="ml-0.5 hover:text-blue-900 leading-none">×</button>
+          </span>
+          <span
+            v-if="store.filters.dateFrom || store.filters.dateTo"
+            class="inline-flex items-center gap-0.5 px-2 py-0.5 bg-blue-50 border border-blue-200 text-blue-700 text-xs rounded-full"
+          >
+            {{ store.filters.dateFrom || '起' }} ～ {{ store.filters.dateTo || '今' }}
+            <button @click="clearDateRange" class="ml-0.5 hover:text-blue-900 leading-none">×</button>
+          </span>
+          <span
+            v-if="store.filters.q"
+            class="inline-flex items-center gap-0.5 px-2 py-0.5 bg-blue-50 border border-blue-200 text-blue-700 text-xs rounded-full"
+          >
+            搜尋：{{ store.filters.q }}
+            <button @click="clearSearch" class="ml-0.5 hover:text-blue-900 leading-none">×</button>
+          </span>
         </div>
 
       </div>

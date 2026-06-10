@@ -230,7 +230,11 @@ export const useExpenseStore = defineStore('expense', () => {
         // 全部狀態或明確篩選已作廢時，都帶 include_inactive 讓 is_active=False 記錄可見
         ...(!filters.value.status || filters.value.status === 'REPLACED_VOID' ? { include_inactive: true } : {}),
         ...(filters.value.dateFrom ? { date_from: filters.value.dateFrom } : {}),
-        ...(filters.value.dateTo ? { date_to: filters.value.dateTo } : {}),
+        ...(filters.value.dateTo
+          ? { date_to: filters.value.dateTo }
+          : filters.value.dateFrom
+            ? { date_to: new Date().toISOString().split('T')[0] }
+            : {}),
         ...(filters.value.q ? { q: filters.value.q } : {}),
         ...(filters.value.dept ? { uploader_dept_q: filters.value.dept } : {}),
         ...(filters.value.category ? { voucher_category_q: filters.value.category } : {}),
