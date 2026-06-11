@@ -4,7 +4,7 @@ import { X, Loader2, PackageX, CheckCircle2, ChevronRight, ChevronDown, Search, 
 import { getStatusConfig } from '../constants/status.js'
 import { getRelationTypeConfig, SUPPLEMENT_RELATION_TYPES, RELATION_TYPE_OPTIONS } from '../constants/relationType.js'
 import { fetchWaitingReturns, fetchExpenses, fetchRelatedExpenses, updateExpense, pairExpense } from '../api/expenseApi'
-import { fetchVoucherCategories } from '../api/configApi'
+import { fetchVoucherCategories, fetchDepartments } from '../api/configApi'
 import { toast } from 'vue3-toastify'
 import { secureImgUrl as imgUrl, isViewableImage } from '../utils/imageUrl'
 import { getVoucherLabel } from '../constants/voucher.js'
@@ -258,9 +258,8 @@ onMounted(loadData)
 
 async function loadAvailableDepts() {
   try {
-    const res = await fetchExpenses({ page_size: 200 })
-    const items = res.data?.data?.items ?? []
-    availableDepts.value = [...new Set(items.map(e => e.uploader_dept).filter(Boolean))].sort()
+    const res = await fetchDepartments()
+    availableDepts.value = res.data?.data?.departments ?? []
   } catch { }
 }
 onMounted(loadAvailableDepts)
