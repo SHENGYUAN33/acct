@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from core.config import settings
 from core.database import SessionLocal
 from models.liff_session import SessionImage, UploadSession
+from models.staff_roster import StaffRoster
 from models.user import User
 from schemas.liff import (
     ExpenseGroupPreview,
@@ -353,8 +354,9 @@ async def process_session_background(
             db.commit()
             return
 
-        uploader_name: str = user.real_name or user.name or session.line_user_id
-        uploader_dept: str = user.department or ""
+        roster_entry = db.scalar(select(StaffRoster).where(StaffRoster.line_user_id == session.line_user_id))
+        uploader_name: str = (roster_entry.name if roster_entry else None) or user.real_name or user.name or session.line_user_id
+        uploader_dept: str = (roster_entry.department if roster_entry else None) or user.department or ""
 
         # 向後相容：舊版 waiting_return_ref → 新版退貨補件欄位橋接
         # 注意：waiting_return_ref 代表退貨物品照，對應 RETURN_SUPPLEMENT

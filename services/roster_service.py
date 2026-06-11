@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from models.staff_roster import StaffRoster
+from models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,21 @@ def update_roster_entry(
     db.commit()
     db.refresh(entry)
     logger.info("roster_service.update_roster_entry: updated id=%s", roster_id)
+
+    # 若已綁定 LINE，同步更新 users 表的 real_name / department
+    if entry.line_user_id and (name is not _UNSET or department is not _UNSET):
+        user = db.scalar(select(User).where(User.line_user_id == entry.line_user_id))
+        if user:
+            if name is not _UNSET:
+                user.real_name = entry.name
+            if department is not _UNSET:
+                user.department = entry.department
+            db.commit()
+            logger.info(
+                "roster_service.update_roster_entry: synced user real_name/department for line_user_id=%s",
+                entry.line_user_id,
+            )
+
     return entry
 
 

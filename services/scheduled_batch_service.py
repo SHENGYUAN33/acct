@@ -12,6 +12,7 @@ import logging
 from sqlalchemy import select
 
 from core.database import SessionLocal
+from models.staff_roster import StaffRoster
 from models.user import User
 from models.user_state import UserState
 from services import auto_split_service
@@ -69,12 +70,16 @@ async def run_scheduled_batch() -> None:
                 pending_count,
             )
 
+            roster_entry = db.execute(
+                select(StaffRoster).where(StaffRoster.line_user_id == state.line_user_id)
+            ).scalar_one_or_none()
+
             try:
                 await auto_split_service.auto_split_process(
                     line_user_id=state.line_user_id,
                     user_id=user.id,
-                    uploader_name=user.real_name or user.name or state.line_user_id,
-                    uploader_dept=user.department or "",
+                    uploader_name=(roster_entry.name if roster_entry else None) or user.real_name or user.name or state.line_user_id,
+                    uploader_dept=(roster_entry.department if roster_entry else None) or user.department or "",
                 )
                 processed += 1
             except Exception as exc:
