@@ -3,7 +3,7 @@
 import json
 import logging
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 logger = logging.getLogger(__name__)
@@ -20,15 +20,18 @@ from models.user import User
 from schemas.ocr import KEY_AUDIT_FIELDS, KEY_FIELD_THRESHOLD, VoucherOCRResult
 
 
+_TW_TZ = timezone(timedelta(hours=8))
+
+
 def _generate_serial_number(db: Session) -> str:
     """
     產生每月重置的案件編號。
     格式：EXP-{YYYYMM}-{當月流水號 4 位}，例：EXP-202604-0001。
     以 MAX 查詢當月最大序號，加 1 作為新序號。
     用 MAX 取代 COUNT，避免刪除記錄後序號重複的問題。
-    race condition 由呼叫方的重試機制處理。
+    race condition 由呼叫方的重試機制處理（呼叫方須在 retry 迴圈內重新呼叫本函式）。
     """
-    prefix = datetime.now().strftime('%Y%m')
+    prefix = datetime.now(tz=_TW_TZ).strftime('%Y%m')
     max_serial: str | None = db.scalar(
         select(func.max(Expense.serial_number)).where(
             Expense.serial_number.like(f"EXP-{prefix}-%")
@@ -111,9 +114,10 @@ def create_expense(
     image_urls: list[str] = [image_url] if isinstance(image_url, str) else image_url
 
     for _attempt in range(5):
+        serial = _generate_serial_number(db)
         expense = Expense(
             user_id=user_id,
-            serial_number=_generate_serial_number(db),
+            serial_number=serial,
             image_url=image_urls,
             uploader_name=uploader_name,
             uploader_dept=uploader_dept,
@@ -270,8 +274,9 @@ def create_expense_manual(
 ) -> Expense:
     """Dashboard 手動新增費用（不透過 LINE 上傳），image_url 初始為空陣列。"""
     for _attempt in range(5):
+        serial = _generate_serial_number(db)
         expense = Expense(
-            serial_number=_generate_serial_number(db),
+            serial_number=serial,
             image_url=[],
             status=ExpenseStatus.PENDING,
             uploader_name=uploader_name,
@@ -792,9 +797,10 @@ def create_batch_expense(
     )
 
     for _attempt in range(5):
+        serial = _generate_serial_number(db)
         expense = Expense(
             user_id=user_id,
-            serial_number=_generate_serial_number(db),
+            serial_number=serial,
             image_url=voucher_images,
             item_image_url=item_images,
             uploader_name=uploader_name,

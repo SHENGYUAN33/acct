@@ -240,15 +240,15 @@ async def classify_and_extract(image_path: str | Path | dict | list) -> VoucherO
     """
     resolved_path = _extract_image_path(image_path)
     try:
-        img = Image.open(resolved_path)
-        response = await _client.aio.models.generate_content(
-            model=settings.gemini_model,
-            contents=[_build_prompt(), img],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=VoucherOCRResult,
-            ),
-        )
+        with Image.open(resolved_path) as img:
+            response = await _client.aio.models.generate_content(
+                model=settings.gemini_model,
+                contents=[_build_prompt(), img],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=VoucherOCRResult,
+                ),
+            )
 
         result: VoucherOCRResult = response.parsed
 

@@ -34,10 +34,12 @@ class TestLineApiTimeout:
         """LINE API 拋出例外時，reply_text 應將例外向上傳遞。"""
         from services import line_service
 
-        with patch("services.line_service.get_line_api") as mock_get_api:
-            mock_api = MagicMock()
-            mock_api.reply_message.side_effect = Exception("LINE API 503 Service Unavailable")
-            mock_get_api.return_value = mock_api
+        mock_messaging_api = MagicMock()
+        mock_messaging_api.reply_message.side_effect = Exception("LINE API 503 Service Unavailable")
+        with patch("services.line_service.ApiClient") as mock_client_cls, \
+             patch("services.line_service.MessagingApi", return_value=mock_messaging_api):
+            mock_client_cls.return_value.__enter__ = MagicMock(return_value=MagicMock())
+            mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
 
             with pytest.raises(Exception, match="LINE API 503"):
                 line_service.reply_text("fake_reply_token", "測試訊息")
@@ -49,29 +51,30 @@ class TestLineApiTimeout:
         """
         from services import line_service
 
-        with patch("services.line_service.get_line_api") as mock_get_api:
-            mock_api = MagicMock()
-            mock_api.push_message.side_effect = Exception("Network timeout")
-            mock_get_api.return_value = mock_api
+        mock_messaging_api = MagicMock()
+        mock_messaging_api.push_message.side_effect = Exception("Network timeout")
+        with patch("services.line_service.ApiClient") as mock_client_cls, \
+             patch("services.line_service.MessagingApi", return_value=mock_messaging_api):
+            mock_client_cls.return_value.__enter__ = MagicMock(return_value=MagicMock())
+            mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
 
             # push_text 有 try-except，不會 re-raise（靜默失敗）
-            # 此行為是設計上的選擇：避免推播失敗影響主流程
             line_service.push_text("fake_user_id", "推播訊息")
-            # 呼叫後不拋例外 → 測試通過
-            mock_api.push_message.assert_called_once()
+            mock_messaging_api.push_message.assert_called_once()
 
     def test_reply_text_succeeds_normally(self) -> None:
         """正常情況下 reply_text 應不拋出例外。"""
         from services import line_service
 
-        with patch("services.line_service.get_line_api") as mock_get_api:
-            mock_api = MagicMock()
-            mock_api.reply_message.return_value = None
-            mock_get_api.return_value = mock_api
+        mock_messaging_api = MagicMock()
+        mock_messaging_api.reply_message.return_value = None
+        with patch("services.line_service.ApiClient") as mock_client_cls, \
+             patch("services.line_service.MessagingApi", return_value=mock_messaging_api):
+            mock_client_cls.return_value.__enter__ = MagicMock(return_value=MagicMock())
+            mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
 
-            # 不應拋出例外
             line_service.reply_text("valid_reply_token", "正常訊息")
-            mock_api.reply_message.assert_called_once()
+            mock_messaging_api.reply_message.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_external_timeout_can_cancel_hanging_request(self) -> None:

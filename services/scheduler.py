@@ -108,8 +108,30 @@ def start_scheduler(
         _scheduler = None
         return
 
+    # 每日凌晨 3 點清理過期 LIFF session 與圖片（固定排程，不受批次設定影響）
+    from core.database import SessionLocal as _SessionLocal
+    from services.liff_service import cleanup_expired_sessions as _cleanup_liff
+
+    async def _run_cleanup_liff() -> None:
+        db = _SessionLocal()
+        try:
+            _cleanup_liff(db)
+        except Exception as exc:
+            logger.error("cleanup_liff job failed: %s", exc, exc_info=True)
+        finally:
+            db.close()
+
+    _scheduler.add_job(
+        _run_cleanup_liff,
+        trigger=CronTrigger(hour=3, minute=0, timezone=_timezone),
+        id="cleanup_liff_sessions",
+        name="LIFF Session 過期清理",
+        replace_existing=True,
+        misfire_grace_time=600,
+    )
+
     _scheduler.start()
-    logger.info("scheduler: 排程器啟動完成，共 %d 個觸發時間點", registered)
+    logger.info("scheduler: 排程器啟動完成，共 %d 個觸發時間點 + LIFF 清理 job", registered)
 
 
 def update_jobs(

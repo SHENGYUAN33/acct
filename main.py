@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
 from core.config import settings
-from core.database import Base, check_db_connection, engine
+from core.database import check_db_connection
 from models import admin_user, liff_session, staff_roster, system_setting  # noqa: F401
 from routers import admin, auth, config, expenses, files, liff, roster, webhook
 from core.database import SessionLocal
@@ -121,8 +121,9 @@ async def serve_liff_single(request: Request) -> Response:
 
 @app.on_event("startup")
 def on_startup() -> None:
-    logger.info("Creating database tables if not exist...")
-    Base.metadata.create_all(bind=engine)
+    if not check_db_connection():
+        logger.error("Database connection failed on startup — 請確認 PostgreSQL 已啟動並執行 alembic upgrade head")
+        raise RuntimeError("Cannot connect to database")
     logger.info("Database ready.")
 
     try:

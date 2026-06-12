@@ -57,14 +57,11 @@ def delete_user_state(db: Session, line_user_id: str) -> None:
         db.commit()
 
 
-def get_line_api() -> MessagingApi:
-    return MessagingApi(ApiClient(_line_config))
-
-
 def get_user_display_name(line_user_id: str) -> str | None:
     """向 LINE API 取得使用者的顯示名稱（暱稱）。失敗時回傳 None。"""
     try:
-        profile = get_line_api().get_profile(line_user_id)
+        with ApiClient(_line_config) as api_client:
+            profile = MessagingApi(api_client).get_profile(line_user_id)
         return profile.display_name
     except Exception as exc:
         logger.warning("line_service.get_user_display_name: failed for user=%s: %s", line_user_id, exc)
@@ -73,12 +70,13 @@ def get_user_display_name(line_user_id: str) -> str | None:
 
 def reply_text(reply_token: str, text: str) -> None:
     """回覆純文字訊息給 LINE 使用者。"""
-    api = get_line_api()
-    req = ReplyMessageRequest(
-        reply_token=reply_token,
-        messages=[TextMessage(text=text)],
-    )
-    api.reply_message(req)
+    with ApiClient(_line_config) as api_client:
+        api = MessagingApi(api_client)
+        req = ReplyMessageRequest(
+            reply_token=reply_token,
+            messages=[TextMessage(text=text)],
+        )
+        api.reply_message(req)
 
 
 
@@ -104,7 +102,6 @@ def push_reject_notification(
             except Exception:
                 categories_display = voucher_categories
 
-        api = get_line_api()
         message_text = (
             f"上傳日期：{upload_date or '無'}\n"
             f"憑證類別：{categories_display}\n"
@@ -116,7 +113,8 @@ def push_reject_notification(
             to=line_user_id,
             messages=[TextMessage(text=message_text)],
         )
-        api.push_message(req)
+        with ApiClient(_line_config) as api_client:
+            MessagingApi(api_client).push_message(req)
         logger.info("退回通知（純文字）已推播給 line_user_id=%s", line_user_id)
     except Exception as e:
         logger.error(
@@ -280,12 +278,12 @@ def setup_rich_menu() -> str:
 def push_text(line_user_id: str, text: str) -> None:
     """主動推播純文字訊息給 LINE 使用者（不需 reply_token）。"""
     try:
-        api = get_line_api()
         req = PushMessageRequest(
             to=line_user_id,
             messages=[TextMessage(text=text)],
         )
-        api.push_message(req)
+        with ApiClient(_line_config) as api_client:
+            MessagingApi(api_client).push_message(req)
     except Exception as e:
         logger.error("LINE push_text 失敗，line_user_id=%s: %s", line_user_id, e, exc_info=True)
 

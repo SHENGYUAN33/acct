@@ -558,3 +558,43 @@ async def process_session_background(
             pass
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# 定期清理
+# ---------------------------------------------------------------------------
+
+def cleanup_expired_sessions(db: Session) -> dict:
+    """刪除過期的 LIFF UploadSession 及其對應磁碟圖片。
+
+    由 scheduler 每日凌晨呼叫；狀態為 uploading 或 expired 且已超過 expires_at 的
+    session 視為廢棄，一併刪除 DB 記錄與 uploads/ 中的圖片檔案。
+    """
+    now = datetime.now(tz=timezone.utc)
+    expired = list(db.scalars(
+        select(UploadSession).where(
+            UploadSession.expires_at < now,
+            UploadSession.status.in_(["uploading", "expired"]),
+        )
+    ))
+
+    deleted_files = 0
+    deleted_sessions = 0
+    for session in expired:
+        for img in session.images:
+            file_path = Path(settings.storage_path) / Path(img.image_path).name
+            try:
+                if file_path.exists():
+                    file_path.unlink()
+                    deleted_files += 1
+            except OSError as exc:
+                logger.warning("cleanup: 無法刪除圖片 %s: %s", file_path, exc)
+        db.delete(session)
+        deleted_sessions += 1
+
+    db.commit()
+    logger.info(
+        "cleanup_expired_sessions: 已刪除 %d sessions、%d 圖片檔",
+        deleted_sessions, deleted_files,
+    )
+    return {"sessions": deleted_sessions, "files": deleted_files}

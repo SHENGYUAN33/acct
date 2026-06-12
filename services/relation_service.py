@@ -279,15 +279,21 @@ def search_fuzzy_expense(
 # ---------------------------------------------------------------------------
 
 def find_active_expense_by_invoice_number(
-    db: Session, invoice_number: str
+    db: Session, invoice_number: str, user_id: uuid.UUID | None = None
 ) -> Expense | None:
-    """依發票號碼查詢最新的 is_active=True 報帳。"""
+    """依發票號碼查詢最新的 is_active=True 報帳。
+
+    user_id 若提供，限制在同一使用者範圍內查詢，防止跨用戶發票號碼誤配。
+    """
+    filters = and_(
+        Expense.invoice_number == invoice_number,
+        Expense.is_active == True,
+    )
+    if user_id is not None:
+        filters = and_(filters, Expense.user_id == user_id)
     return db.scalar(
         select(Expense)
-        .where(and_(
-            Expense.invoice_number == invoice_number,
-            Expense.is_active == True,
-        ))
+        .where(filters)
         .order_by(Expense.created_at.desc())
     )
 
@@ -365,7 +371,7 @@ def auto_link_records(
 
         if relation:
             ref_inv = relation["invoice_number"]
-            original = find_active_expense_by_invoice_number(db, ref_inv)
+            original = find_active_expense_by_invoice_number(db, ref_inv, user_id=new_expense.user_id)
 
             if relation["type"] == "VOID_REPLACE" and original:
                 # 標記原始單為已被換單（保留審核狀態，CSV 以負數計）
