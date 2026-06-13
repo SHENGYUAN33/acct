@@ -32,6 +32,8 @@ _PROMPT_TEMPLATE = """你是一個具備台灣會計知識的財務審計助理�
 
 ━━ 步驟 1A：憑證類型（voucher_category）━━
   INVOICE    → 印有「統一發票」字樣，有字軌號碼（如 AB-12345678）
+              ※ 統一發票右上或表頭區通常印有賣方統一編號（8 碼數字），務必萃取至 seller_tax_id；
+                電子發票載具條碼區段旁亦常有賣方統編，同樣萃取
   RECEIPT    → 視覺上為傳統收據格式：POS 收銀機列印或手寫收據（賣方名稱＋品項＋金額）；無統一發票字軌
               範例：超商收據、餐廳收據、加油站 POS 收據、停車場 POS 收據、文具店收據
               **不包含**：票根、票券、對帳單、帳單、政府公文、截圖、保險文件、銀行文件、醫療收據、證明文件
@@ -115,6 +117,8 @@ _PROMPT_TEMPLATE = """你是一個具備台灣會計知識的財務審計助理�
 各類型萃取欄位清單：
   INVOICE       → invoice_number, seller_name, seller_tax_id, buyer_tax_id,
                    total_amount, net_amount, tax_amount, expense_date
+                   ※ seller_tax_id 為 8 碼數字，通常印於發票右上角或表頭賣方欄；
+                     電子發票亦同，務必萃取，不得遺漏
   RECEIPT       → seller_name, seller_tax_id, total_amount, expense_date,
                    has_exempt_stamp（EXEMPT_INVOICE 子類型為 true）
                    ※ 收據上若印有「統一編號」欄位，務必萃取至 seller_tax_id（8 碼數字）
