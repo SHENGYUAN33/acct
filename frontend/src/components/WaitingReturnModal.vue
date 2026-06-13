@@ -61,8 +61,8 @@ const filteredCases = computed(() => {
     if (leftFilter.invoice_number && !inv.invoice_number?.includes(leftFilter.invoice_number)) return false
     if (leftFilter.uploader_name && !inv.uploader_name?.includes(leftFilter.uploader_name)) return false
     if (leftFilter.uploader_dept && inv.uploader_dept !== leftFilter.uploader_dept) return false
-    if (leftFilter.date_from && inv.expense_date && inv.expense_date < leftFilter.date_from) return false
-    if (leftFilter.date_to && inv.expense_date && inv.expense_date > leftFilter.date_to) return false
+    if (leftFilter.date_from && inv.upload_date && inv.upload_date.slice(0, 10) < leftFilter.date_from) return false
+    if (leftFilter.date_to && inv.upload_date && inv.upload_date.slice(0, 10) > leftFilter.date_to) return false
     if (leftFilter.amount_min !== '' && Number(inv.total_amount) < Number(leftFilter.amount_min)) return false
     if (leftFilter.amount_max !== '' && Number(inv.total_amount) > Number(leftFilter.amount_max)) return false
     if (leftFilter.voucher_category && !matchesVoucherCat(inv, leftFilter.voucher_category)) return false
@@ -158,8 +158,8 @@ const filteredOrphanSupplements = computed(() => {
     if (rightFilter.invoice_number && !sup.invoice_number?.includes(rightFilter.invoice_number)) return false
     if (rightFilter.uploader_name && !sup.uploader_name?.includes(rightFilter.uploader_name)) return false
     if (rightFilter.uploader_dept && sup.uploader_dept !== rightFilter.uploader_dept) return false
-    if (rightFilter.date_from && sup.expense_date && sup.expense_date < rightFilter.date_from) return false
-    if (rightFilter.date_to && sup.expense_date && sup.expense_date > rightFilter.date_to) return false
+    if (rightFilter.date_from && sup.upload_date && sup.upload_date.slice(0, 10) < rightFilter.date_from) return false
+    if (rightFilter.date_to && sup.upload_date && sup.upload_date.slice(0, 10) > rightFilter.date_to) return false
     if (rightFilter.amount_min !== '' && Number(sup.total_amount) < Number(rightFilter.amount_min)) return false
     if (rightFilter.amount_max !== '' && Number(sup.total_amount) > Number(rightFilter.amount_max)) return false
     if (rightFilter.voucher_category && !matchesVoucherCat(sup, rightFilter.voucher_category)) return false
@@ -970,13 +970,8 @@ async function unlinkSupplement(supplement, invoice) {
 
               <!-- 建議配對 -->
               <div v-if="sup.suggested_match"
-                class="flex items-center gap-1.5 mb-1.5 px-2 py-1 bg-amber-50 border border-amber-200 rounded-lg">
+                class="mb-1.5 px-2 py-1 bg-amber-50 border border-amber-200 rounded-lg">
                 <span class="text-[9px] text-amber-600 font-medium">✨ 建議配對至 {{ sup.suggested_match.serial_number }}</span>
-                <button
-                  @click.stop="confirmSuggestedMatch(sup)"
-                  :disabled="isLinking"
-                  class="ml-auto text-[9px] px-1.5 py-0.5 bg-amber-500 hover:bg-amber-600 text-white rounded disabled:opacity-50 transition-colors"
-                >一鍵確認</button>
               </div>
 
               <!-- 發票資訊 -->

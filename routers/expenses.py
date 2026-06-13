@@ -382,11 +382,14 @@ def list_waiting_returns(
     cases_dict: dict[str, dict] = {}
     orphan_supplements = []
 
-    # Step 5：補件配對原始憑證（parent_id IS NULL，以 referenced_invoice_number 匹配）
+    # Step 5：補件配對原始憑證（parent_id IS NULL，以 referenced_invoice_number + user_id 匹配）
     for sup in supplements:
         matched_invoice: Expense | None = None
         if sup.referenced_invoice_number:
-            matched_invoice = invoice_by_number.get(sup.referenced_invoice_number)
+            candidate = invoice_by_number.get(sup.referenced_invoice_number)
+            # 上傳者須相同才自動進左欄，防止跨人誤配
+            if candidate and candidate.user_id == sup.user_id:
+                matched_invoice = candidate
         if matched_invoice:
             key = str(matched_invoice.id)
             if key not in cases_dict:

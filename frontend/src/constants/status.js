@@ -25,5 +25,5 @@ export const FILTER_STATUS_OPTIONS = [
   { value: 'PENDING',            label: STATUS_CONFIG.PENDING.label },
   { value: 'NEEDS_MANUAL_REVIEW',label: STATUS_CONFIG.NEEDS_MANUAL_REVIEW.label },
   { value: 'APPROVED',           label: STATUS_CONFIG.APPROVED.label },
-  { value: 'REPLACED_VOID',      label: STATUS_CONFIG.REPLACED_VOID.label },
+  { value: 'WAITING_RETURN',     label: STATUS_CONFIG.WAITING_RETURN.label },
 ]
