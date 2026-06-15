@@ -149,7 +149,7 @@ cd frontend && npm test && cd ..
 | `requirements.txt` | 無 GCS 套件 | 新增 `google-cloud-storage>=2.16.0` |
 | `core/config.py` | 只有 `storage_path` | 新增 `storage_backend`（local/gcs）與 `gcs_bucket` |
 | `services/storage_service.py` | `dest.write_bytes()` 寫本機 | 改呼叫統一儲存層 |
-| `services/line_service.py` | `download_image()` 寫本機 | 改呼叫統一儲存層 |
+| `services/line_service.py` | `download_image()` 寫本機 | 維持原狀（無 live caller — 聊天上傳圖片流程已改走 LIFF / `storage_service`，不在 Cloud Run 請求路徑上） |
 | `services/ocr_service.py` | `Image.open(本機路徑)` | 改成從儲存層取 bytes 再 `Image.open(BytesIO)` |
 | `routers/files.py` | `FileResponse(本機路徑)` | 改成從 GCS 取 bytes 用 `Response`/`StreamingResponse` 回傳 |
 | `services/liff_service.py` | 清理時刪本機檔 | 改呼叫儲存層刪除 |
