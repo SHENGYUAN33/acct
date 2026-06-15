@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi import HTTPException, UploadFile
 
 from core.config import settings
+from services import object_storage
 
 logger = logging.getLogger(__name__)
 
@@ -76,13 +77,12 @@ async def save_image(file: UploadFile) -> str:
     ext = raw_ext if raw_ext in _ALLOWED_EXTENSIONS else ".jpg"
 
     filename = f"{uuid.uuid4()}{ext}"
-    dest = Path(settings.storage_path) / filename
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    rel_path = f"uploads/{filename}"
 
     try:
-        dest.write_bytes(content)
-    except OSError as e:
-        logger.error("檔案寫入磁碟失敗 path=%s: %s", dest, e, exc_info=True)
+        object_storage.put_bytes(rel_path, content, content_type=content_type)
+    except Exception as e:
+        logger.error("檔案儲存失敗 path=%s: %s", rel_path, e, exc_info=True)
         raise HTTPException(status_code=500, detail="檔案儲存失敗，請稍後再試")
 
-    return f"uploads/{filename}"
+    return rel_path

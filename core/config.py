@@ -29,6 +29,10 @@ class Settings(BaseSettings):
 
     # Storage
     storage_path: str = "./uploads"
+    # 儲存後端：local（本機磁碟，開發用）/ gcs（Cloud Run 使用 Google Cloud Storage）
+    storage_backend: str = "local"
+    # GCS bucket 名稱（storage_backend=gcs 時必填）
+    gcs_bucket: str = ""
 
     # App
     app_env: str = "development"
@@ -36,6 +40,8 @@ class Settings(BaseSettings):
     app_port: int = 8000
     app_debug: bool = False
     company_tax_id: str = ""
+    # Cloud Scheduler 呼叫 /api/v1/admin/cleanup-liff 時驗證用的共享密鑰（空字串 = 停用該端點）
+    cleanup_token: str = ""
 
     # CORS：production 時填入允許的 origin 清單（逗號分隔或 JSON array）
     cors_origins: list[str] = []
@@ -67,24 +73,6 @@ class Settings(BaseSettings):
     # "batch"  = 依憑證斷點切割成多筆（批次報帳模式）
     liff_submit_mode: str = "single"
 
-    # 功能開關：自動切割（60 秒無操作自動送出）
-    # ⚠️  僅適用於單 Worker 模式（uvicorn --workers 1），多 Worker 時必須設為 False
-    enable_auto_split: bool = False
-    auto_split_debounce_seconds: int = 60
-
-    # 功能開關：每日排程批次處理
-    # 啟用後，依 SCHEDULED_BATCH_TIMES 在固定時間點統一處理所有 pending 圖片
-    # ⚠️  同 ENABLE_AUTO_SPLIT，僅支援單 Worker 模式（uvicorn --workers 1）
-    enable_scheduled_batch: bool = False
-    # 批次觸發時間清單（HH:MM 格式，逗號分隔，可設多個時間點）
-    # 範例：
-    #   單一時間  → "20:00"
-    #   雙時段    → "20:00,22:00"
-    #   模擬範圍  → "20:00,20:30,21:00,21:30,22:00"
-    scheduled_batch_times: list[str] = ["20:00"]
-    # 排程時區（需與伺服器部署時區一致）
-    scheduled_batch_timezone: str = "Asia/Taipei"
-
     # OCR 並行控制：最多同時送出幾個 Gemini 請求（避免 RPM 429）
     ocr_max_concurrent: int = 3
     # OCR 重試次數（含第一次；失敗後指數退避）
@@ -109,16 +97,6 @@ class Settings(BaseSettings):
         "收音組", "劇本組", "導演組", "演員組", "航拍組",
         "檔案管理組", "後期剪輯", "後期特效", "公司組",
     ]
-
-    @field_validator("scheduled_batch_times", mode="before")
-    @classmethod
-    def parse_scheduled_batch_times(cls, v: object) -> list[str]:
-        if isinstance(v, str):
-            stripped = v.strip()
-            if stripped.startswith("["):
-                return json.loads(stripped)
-            return [t.strip() for t in stripped.split(",") if t.strip()]
-        return v
 
     @field_validator("departments", mode="before")
     @classmethod

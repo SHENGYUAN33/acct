@@ -1,13 +1,14 @@
 """
-Unit tests for Sprint 3 auto-split logic.
+Unit tests for Sprint 3 voucher-split logic.
 
 涵蓋範圍：
 - multi_split_logic()：各種切割場景（純函式，無 DB / 網路依賴）
 - _parse_buffer()：新舊格式解析 + timestamp 排序
-- auto_split_timer：schedule / cancel / 滑動視窗行為
+
+註：原 auto_split_timer（60 秒滑動視窗 Timer）已移除，相關測試一併刪除。
+    切割邏輯仍由 LIFF 批次送出流程使用，故保留以下純函式測試。
 """
 
-import asyncio
 import json
 import sys
 from unittest.mock import MagicMock
@@ -175,92 +176,3 @@ class TestParseBuffer:
         assert entries[0].path == "x.jpg"
         assert entries[0].timestamp == 0
         assert entries[0].message_id == ""
-
-
-# ---------------------------------------------------------------------------
-# auto_split_timer — Timer 行為測試
-# ---------------------------------------------------------------------------
-
-class TestAutoSplitTimer:
-    def test_timer_cancel_before_fire(self):
-        """schedule 後立即 cancel → callback 不執行，cancel 返回 True"""
-        from services import auto_split_timer
-
-        fired = []
-
-        async def run():
-            async def callback():
-                fired.append(True)
-
-            auto_split_timer.schedule("user1", delay_seconds=0.05, callback=callback)
-            cancelled = auto_split_timer.cancel("user1")
-            assert cancelled is True
-            # 等待足夠時間確認 callback 未執行
-            await asyncio.sleep(0.1)
-            assert fired == []
-
-        asyncio.run(run())
-
-    def test_timer_fires_after_delay(self):
-        """schedule 後等待超過 delay → callback 執行"""
-        from services import auto_split_timer
-
-        fired = []
-
-        async def run():
-            async def callback():
-                fired.append(True)
-
-            auto_split_timer.schedule("user2", delay_seconds=0.05, callback=callback)
-            await asyncio.sleep(0.15)
-            assert fired == [True]
-
-        asyncio.run(run())
-
-    def test_timer_sliding_window(self):
-        """連續 schedule 重設視窗，只保留最後一個 task（舊 task 被取消）"""
-        from services import auto_split_timer
-
-        fired_count = []
-
-        async def run():
-            async def callback():
-                fired_count.append(1)
-
-            # 快速連續 schedule 3 次（間距 0.05s << 延遲 0.3s，確保前兩個被取消）
-            # Windows asyncio.sleep 精度約 15ms，需拉大間距避免 timing race
-            auto_split_timer.schedule("user3", delay_seconds=0.3, callback=callback)
-            await asyncio.sleep(0.05)
-            auto_split_timer.schedule("user3", delay_seconds=0.3, callback=callback)
-            await asyncio.sleep(0.05)
-            auto_split_timer.schedule("user3", delay_seconds=0.3, callback=callback)
-            # 等待最後一次 delay 結束（0.1 + 0.3 + 0.1 margin）
-            await asyncio.sleep(0.5)
-            # 只應觸發一次
-            assert len(fired_count) == 1
-
-        asyncio.run(run())
-
-    def test_cancel_nonexistent_user_returns_false(self):
-        """對不存在的 user_id 執行 cancel → 返回 False，不 raise"""
-        from services import auto_split_timer
-        result = auto_split_timer.cancel("nonexistent_user_xyz")
-        assert result is False
-
-    def test_active_count(self):
-        """active_count 正確反映活躍 timer 數量"""
-        from services import auto_split_timer
-
-        async def run():
-            async def noop():
-                pass
-
-            initial = auto_split_timer.active_count()
-            auto_split_timer.schedule("count_user_a", 10.0, noop)
-            auto_split_timer.schedule("count_user_b", 10.0, noop)
-            assert auto_split_timer.active_count() == initial + 2
-            auto_split_timer.cancel("count_user_a")
-            auto_split_timer.cancel("count_user_b")
-            assert auto_split_timer.active_count() == initial
-
-        asyncio.run(run())

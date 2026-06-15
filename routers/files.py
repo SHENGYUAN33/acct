@@ -13,10 +13,10 @@ import re
 from pathlib import Path
 
 from fastapi import APIRouter, Header, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 
-from core.config import settings
 from core.security import decode_access_token
+from services import object_storage
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def serve_upload(
     filename: str,
     authorization: str | None = Header(default=None),
     token: str | None = Query(default=None),
-) -> FileResponse:
+) -> Response:
     """
     JWT 保護的檔案代理端點。
     認證通過後從 STORAGE_PATH 讀取檔案並串流回傳，
@@ -71,15 +71,15 @@ def serve_upload(
     if not _SAFE_FILENAME_RE.match(filename):
         raise HTTPException(status_code=404, detail="檔案不存在")
 
-    path = Path(settings.storage_path) / filename
-    if not path.exists() or not path.is_file():
+    data = object_storage.get_bytes(f"uploads/{filename}")
+    if data is None:
         raise HTTPException(status_code=404, detail="檔案不存在")
 
     suffix = Path(filename).suffix.lower()
     media_type = _EXT_TO_MIME.get(suffix, "application/octet-stream")
 
-    return FileResponse(
-        path,
+    return Response(
+        content=data,
         media_type=media_type,
         headers={"Cache-Control": "private, max-age=300"},
     )

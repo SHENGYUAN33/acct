@@ -1,28 +1,19 @@
 """
-自動切割服務（Sprint 3）
+憑證切割邏輯（Sprint 3）
 
-Timer 觸發後執行：
-  1. 從 DB 讀取 pending buffer → 立即清空（防止重複觸發）
-  2. 依 event.timestamp 排序
-  3. 序列執行 OCR（classify_and_extract），避免 Gemini RPM 429
-  4. multi_split_logic：以 is_voucher=True 的圖片作為斷點，切割成多個群組
-  5. 每個群組各自呼叫 create_batch_expense（trigger_by="auto_split"）
+提供 LIFF 批次送出共用的純切割工具：
+  - multi_split_logic / multi_split_logic_v2：以 is_voucher=True 的圖片作為斷點切割群組
+  - distribute_description*：將備註文字分配到各群組
+  - _ImageEntry / _parse_buffer：pending buffer 結構與解析
+
+註：原「60 秒自動切割 Timer」與「每日排程批次」功能已移除（不相容 Cloud Run 無狀態架構），
+    本模組僅保留 LIFF 流程實際使用的純函式。
 """
 
-import asyncio
 import json
 import logging
-import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
 
-from sqlalchemy import and_, select
-
-from core.config import settings
-from core.database import SessionLocal
-from models.expense import Expense
-from models.user_state import UserState
-from services import expense_service, relation_service
 from schemas.ocr import VoucherOCRResult
 
 logger = logging.getLogger(__name__)
@@ -248,142 +239,3 @@ def distribute_description_by_timestamps(
         buckets[assigned_group].append(text)
 
     return ["\n".join(bucket) for bucket in buckets]
-
-
-# ---------------------------------------------------------------------------
-# Timer callback：完整的自動切割流程
-# ---------------------------------------------------------------------------
-
-async def auto_split_process(
-    line_user_id: str,
-    user_id: uuid.UUID,
-    uploader_name: str,
-    uploader_dept: str,
-) -> None:
-    """
-    自動切割 Timer callback。
-
-    設計參考 webhook.py 的 _process_batch()：
-    - 使用獨立 DB session（不共用 request session）
-    - try / finally 確保 session 關閉
-    - 立即清空 buffer 防止重複觸發
-    - 序列 OCR 避免 Gemini RPM 429（postmortem #003 / #004）
-    """
-    db = SessionLocal()
-    try:
-        state = db.get(UserState, line_user_id)
-        if not state or not state.pending_images or state.pending_images == "[]":
-            logger.info(
-                "auto_split_process: no pending images for user=%s, skip",
-                line_user_id,
-            )
-            return
-
-        # 解析 buffer，立即清空（防重複）
-        entries = _parse_buffer(state.pending_images)
-        pending_description: str = state.pending_description or ""
-        state.pending_images = "[]"
-        state.pending_description = ""
-        db.commit()
-
-        if not entries:
-            return
-
-        logger.info(
-            "auto_split_process: processing %d image(s) for user=%s",
-            len(entries),
-            line_user_id,
-        )
-
-        # Webhook 路徑不執行 OCR；統一以空殼 stub 建立 NEEDS_MANUAL_REVIEW 報帳
-        ocr_results: list[VoucherOCRResult] = [
-            VoucherOCRResult(success=False, is_voucher=False)
-            for _ in entries
-        ]
-
-        # 兩階段切割：取得群組 + 孤立物品圖
-        groups, orphan_paths = multi_split_logic_v2(entries, ocr_results)
-
-        logger.info(
-            "auto_split_process: split into %d group(s), %d orphan image(s) for user=%s",
-            len(groups), len(orphan_paths), line_user_id,
-        )
-
-        # 處理孤立物品圖：向前關聯 ORPHAN_WINDOW_MINUTES 分鐘內的最新報帳
-        if orphan_paths:
-            resolved = relation_service.attach_orphan_images_to_recent_expense(
-                db, user_id, orphan_paths, window_minutes=settings.orphan_window_minutes
-            )
-            if not resolved:
-                # 無可關聯的近期報帳 → 建立純物品圖報帳，標記為人工審核
-                try:
-                    expense_service.create_batch_expense(
-                        db=db,
-                        user_id=user_id,
-                        pending_images=orphan_paths,
-                        ocr_results=[r for r in ocr_results if not r.is_voucher][: len(orphan_paths)],
-                        user_description=pending_description,
-                        uploader_name=uploader_name,
-                        uploader_dept=uploader_dept,
-                        trigger_by="auto_split_orphan",
-                    )
-                except Exception as exc:
-                    logger.error(
-                        "auto_split_process: orphan create_batch_expense failed user=%s: %s",
-                        line_user_id, exc, exc_info=True,
-                    )
-
-        # 同批次共用 group_id（供 Dashboard 整捆操作）
-        batch_group_id = uuid.uuid4() if groups else None
-
-        # 以憑證時序分配備註至各群組：各群組第一張圖即為憑證，取其 timestamp 作為邊界
-        path_to_timestamp = {e.path: e.timestamp for e in entries}
-        voucher_timestamps: list[int] = [
-            path_to_timestamp.get(group_paths[0], 0)
-            for group_paths, _ in groups
-            if group_paths
-        ]
-        group_descriptions = distribute_description_by_timestamps(pending_description, voucher_timestamps)
-
-        # 每個群組建立一筆 Expense
-        for idx, ((group_paths, group_ocr), group_desc) in enumerate(
-            zip(groups, group_descriptions), start=1
-        ):
-            try:
-                expense = expense_service.create_batch_expense(
-                    db=db,
-                    user_id=user_id,
-                    pending_images=group_paths,
-                    ocr_results=group_ocr,
-                    user_description=group_desc,
-                    uploader_name=uploader_name,
-                    uploader_dept=uploader_dept,
-                    trigger_by="auto_split",
-                    group_id=batch_group_id,
-                )
-                logger.info(
-                    "auto_split_process: created expense group=%d/%d serial=%s user=%s",
-                    idx,
-                    len(groups),
-                    expense.serial_number,
-                    line_user_id,
-                )
-            except Exception as exc:
-                logger.error(
-                    "auto_split_process: create_batch_expense failed group=%d paths=%s user=%s: %s",
-                    idx,
-                    group_paths,
-                    line_user_id,
-                    exc,
-                    exc_info=True,
-                )
-
-    except Exception as exc:
-        logger.error(
-            "auto_split_process: unexpected error user=%s: %s",
-            line_user_id,
-            exc,
-            exc_info=True,
-        )
-    finally:
-        db.close()

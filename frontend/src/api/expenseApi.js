@@ -98,29 +98,6 @@ export const reOcrExpense = (id) =>
   })
 
 /**
- * POST /api/v1/admin/process-pending
- * 立即觸發所有 pending 圖片的批次 OCR 處理（不等待排程時間）
- * 端點立即回傳，實際處理在後端背景執行
- */
-export const processPendingNow = () =>
-  apiClient.post('/api/v1/admin/process-pending')
-
-/**
- * GET /api/v1/admin/scheduler-config
- * 取得目前排程設定（enabled, times, timezone, scheduled_jobs）
- */
-export const getSchedulerConfig = () =>
-  apiClient.get('/api/v1/admin/scheduler-config')
-
-/**
- * PATCH /api/v1/admin/scheduler-config
- * 更新排程設定，立即生效並持久化至 DB
- * @param {{ enabled: boolean, times: string[], timezone: string }} payload
- */
-export const updateSchedulerConfig = (payload) =>
-  apiClient.patch('/api/v1/admin/scheduler-config', payload)
-
-/**
  * POST /api/v1/expenses/{id}/images/replace
  * 替換陣列中指定索引的圖片（multipart/form-data）
  * @param {string} id - Expense UUID

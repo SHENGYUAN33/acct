@@ -42,6 +42,7 @@ from services.auto_split_service import (
     _ImageEntry,
     multi_split_logic_v2,
 )
+from services import object_storage
 
 logger = logging.getLogger(__name__)
 
@@ -582,13 +583,12 @@ def cleanup_expired_sessions(db: Session) -> dict:
     deleted_sessions = 0
     for session in expired:
         for img in session.images:
-            file_path = Path(settings.storage_path) / Path(img.image_path).name
             try:
-                if file_path.exists():
-                    file_path.unlink()
+                if object_storage.exists(img.image_path):
+                    object_storage.delete(img.image_path)
                     deleted_files += 1
-            except OSError as exc:
-                logger.warning("cleanup: 無法刪除圖片 %s: %s", file_path, exc)
+            except Exception as exc:
+                logger.warning("cleanup: 無法刪除圖片 %s: %s", img.image_path, exc)
         db.delete(session)
         deleted_sessions += 1
 

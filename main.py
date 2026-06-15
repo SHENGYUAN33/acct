@@ -12,9 +12,6 @@ from core.config import settings
 from core.database import check_db_connection
 from models import admin_user, liff_session, staff_roster, system_setting  # noqa: F401
 from routers import admin, auth, config, expenses, files, liff, roster, webhook
-from core.database import SessionLocal
-from services import line_service
-from services.scheduler import get_scheduled_jobs, start_scheduler, stop_scheduler
 
 logging.basicConfig(
     level=logging.DEBUG if settings.app_debug else logging.INFO,
@@ -42,6 +39,7 @@ app.add_middleware(
 # Routers
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(admin.ops_router)
 app.include_router(config.router)
 app.include_router(webhook.router)
 app.include_router(expenses.router)
@@ -126,40 +124,6 @@ def on_startup() -> None:
         raise RuntimeError("Cannot connect to database")
     logger.info("Database ready.")
 
-    try:
-        rich_menu_id = line_service.setup_rich_menu()
-        logger.info("Rich Menu: %s", rich_menu_id)
-    except Exception as e:
-        logger.warning("Rich Menu init failed: %s", e)
-
-    _sched_enabled = settings.enable_scheduled_batch
-    _sched_times = settings.scheduled_batch_times
-    _sched_tz = settings.scheduled_batch_timezone
-    _db = SessionLocal()
-    try:
-        from models.system_setting import SystemSetting
-        import json as _json
-        row_enabled = _db.get(SystemSetting, "scheduler.enabled")
-        row_times = _db.get(SystemSetting, "scheduler.times")
-        row_tz = _db.get(SystemSetting, "scheduler.timezone")
-        if row_enabled is not None:
-            _sched_enabled = row_enabled.value == "true"
-        if row_times is not None:
-            _sched_times = _json.loads(row_times.value)
-        if row_tz is not None:
-            _sched_tz = row_tz.value
-    except Exception as _e:
-        logger.warning("Cannot read scheduler settings from DB: %s", _e)
-    finally:
-        _db.close()
-
-    start_scheduler(times=_sched_times, enabled=_sched_enabled, timezone_str=_sched_tz)
-
-
-@app.on_event("shutdown")
-def on_shutdown() -> None:
-    stop_scheduler()
-
 
 @app.get("/health", tags=["health"])
 def health_check() -> dict:
@@ -168,7 +132,6 @@ def health_check() -> dict:
         "status": "success" if db_ok else "error",
         "data": {
             "db": "ok" if db_ok else "unreachable",
-            "scheduled_jobs": get_scheduled_jobs(),
         },
         "message": "AcctAssist is running",
     }

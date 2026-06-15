@@ -2,12 +2,12 @@
 模組 B：並發狀態機測試（Race Condition）
 
 這些測試的目的是「先記錄現有行為」：
-  B1 - 同一使用者兩個 Timer 並發 schedule → 驗證 C3 風險
-  B2 - Auto Split Timer 並發 schedule/cancel → callback 只被呼叫 1 次
   B3 - serial_number 在並發下的唯一性
-  B4 - 序列號碼跨並發不重複（純函式層級驗證）
+  B4 - 序列號碼格式一致性
+  B1 - pending_images 並發 append（race condition 記錄）
 
-注意：B1/B2 需要真實 asyncio event loop（不依賴真實 DB 和網路）。
+註：原 Auto Split Timer 並發測試（B2）已隨「自動切割」功能移除一併刪除。
+
 B3 使用 SQLite in-memory（不支援 SELECT FOR UPDATE，但可驗證唯一性約束）。
 """
 
@@ -19,162 +19,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-
-
-# ---------------------------------------------------------------------------
-# B2：Auto Split Timer 並發 schedule/cancel
-# ---------------------------------------------------------------------------
-
-
-class TestAutoSplitTimerConcurrency:
-    """驗證 C3 風險：global _timers dict 在並發 schedule 下的行為。"""
-
-    @pytest.mark.asyncio
-    async def test_multiple_schedule_same_user_only_one_fires(self) -> None:
-        """
-        同一 user_id 同步連續呼叫 10 次 schedule（滑動視窗）。
-        每次 schedule 都取消前一個，最終只有第 10 個 Timer 存活並觸發 callback。
-
-        關鍵：schedule 之間不 await（同步呼叫），避免事件循環切換讓舊 timer 提早觸發。
-        """
-        from services import auto_split_timer
-
-        # 清除殘留狀態
-        auto_split_timer._timers.clear()
-
-        fire_count = 0
-        fire_event = asyncio.Event()
-
-        async def callback():
-            nonlocal fire_count
-            fire_count += 1
-            fire_event.set()
-
-        user_id = "test_user_concurrent_sync"
-        delay = 0.1  # 100ms debounce
-
-        # 同步連續 schedule 10 次（不 await 在中間，避免舊 timer 提早執行）
-        for _ in range(10):
-            auto_split_timer.schedule(user_id, delay, callback)
-        # 此時事件循環還未切換，10 個 schedule 都在同一個同步塊中執行
-        # _timers 裡只剩第 10 個 task（其他都被 cancel）
-
-        # 等待最後一個 Timer 觸發（100ms + buffer）
-        try:
-            await asyncio.wait_for(fire_event.wait(), timeout=1.0)
-        except asyncio.TimeoutError:
-            pytest.fail("Timer 未在預期時間內觸發")
-
-        # 給一點時間讓多餘的 timer（若存在）也觸發
-        await asyncio.sleep(0.1)
-
-        # callback 應只被呼叫 1 次
-        assert fire_count == 1, \
-            f"callback 被呼叫 {fire_count} 次，預期只有 1 次（滑動視窗取消應生效）"
-
-        # 清除狀態
-        auto_split_timer._timers.clear()
-
-    @pytest.mark.asyncio
-    async def test_cancel_before_fire_prevents_callback(self) -> None:
-        """cancel() 在 Timer 觸發前呼叫 → callback 不應被執行。"""
-        from services import auto_split_timer
-
-        auto_split_timer._timers.clear()
-
-        fired = False
-
-        async def callback():
-            nonlocal fired
-            fired = True
-
-        user_id = "test_user_cancel"
-
-        auto_split_timer.schedule(user_id, delay_seconds=0.2, callback=callback)
-        assert auto_split_timer.active_count() >= 1
-
-        # 在觸發前取消
-        auto_split_timer.cancel(user_id)
-
-        # 等待超過 debounce 時間
-        await asyncio.sleep(0.3)
-
-        assert not fired, "已 cancel 的 Timer 不應執行 callback"
-        auto_split_timer._timers.clear()
-
-    @pytest.mark.asyncio
-    async def test_concurrent_schedule_from_multiple_coroutines(self) -> None:
-        """
-        驗證 C3 風險：多個協程並發呼叫同一 user_id 的 schedule。
-        預期行為（若無 race condition）：最終只剩 1 個活躍 Timer。
-        """
-        from services import auto_split_timer
-
-        auto_split_timer._timers.clear()
-
-        fire_count = 0
-
-        async def callback():
-            nonlocal fire_count
-            fire_count += 1
-
-        user_id = "test_concurrent_coroutines"
-        delay = 0.1
-
-        # 並發呼叫 schedule（模擬真實並發情境）
-        async def do_schedule():
-            auto_split_timer.schedule(user_id, delay, callback)
-
-        await asyncio.gather(*[do_schedule() for _ in range(5)])
-
-        # 等待 Timer 觸發
-        await asyncio.sleep(0.3)
-
-        # 在理想情況下 fire_count == 1
-        # 目前有 C3 bug，可能 > 1（記錄現有行為，不強制失敗）
-        print(f"[INFO] 並發 schedule 後 callback 被呼叫 {fire_count} 次")
-        assert fire_count >= 1, "至少應有 1 次 callback 觸發"
-        # 如果 fire_count > 1，說明存在 race condition
-        if fire_count > 1:
-            import warnings
-            warnings.warn(
-                f"⚠️ Race Condition 確認：並發 schedule 導致 callback 執行 {fire_count} 次（應為 1 次）",
-                UserWarning,
-                stacklevel=2,
-            )
-
-        auto_split_timer._timers.clear()
-
-    @pytest.mark.asyncio
-    async def test_different_users_independent_timers(self) -> None:
-        """不同 user_id 的 Timer 互相獨立，cancel 一個不影響另一個。"""
-        from services import auto_split_timer
-
-        auto_split_timer._timers.clear()
-
-        user_a_fired = False
-        user_b_fired = False
-
-        async def callback_a():
-            nonlocal user_a_fired
-            user_a_fired = True
-
-        async def callback_b():
-            nonlocal user_b_fired
-            user_b_fired = True
-
-        auto_split_timer.schedule("user_a", 0.05, callback_a)
-        auto_split_timer.schedule("user_b", 0.05, callback_b)
-
-        # 只取消 user_a
-        auto_split_timer.cancel("user_a")
-
-        await asyncio.sleep(0.2)
-
-        assert not user_a_fired, "user_a 的 Timer 被 cancel 後不應觸發"
-        assert user_b_fired, "user_b 的 Timer 不應受 user_a cancel 影響"
-
-        auto_split_timer._timers.clear()
 
 
 # ---------------------------------------------------------------------------

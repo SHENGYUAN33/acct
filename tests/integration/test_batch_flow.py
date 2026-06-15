@@ -466,7 +466,6 @@ def _webhook_client(db_session: Session, raise_server_exceptions: bool = False):
     with (
         patch("core.database.Base.metadata.create_all", MagicMock()),
         patch("services.line_service.setup_rich_menu", MagicMock(return_value="RMU_test")),
-        patch("main.start_scheduler", MagicMock()),
     ):
         with TestClient(app, raise_server_exceptions=raise_server_exceptions) as client:
             yield client

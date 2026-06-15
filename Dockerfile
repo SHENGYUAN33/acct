@@ -30,5 +30,7 @@ RUN mkdir -p /app/uploads
 EXPOSE 8000
 
 # alembic upgrade head is intentionally NOT run here.
-# It must run against a live database, so docker-compose entrypoint handles it.
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# It must run against a live database (docker-compose entrypoint / Cloud Run Job handles it).
+# Cloud Run 以環境變數 PORT（預設 8080）告知監聽埠；以 shell 形式啟動才能展開 $PORT。
+# docker-compose 會以自身 command/entrypoint 覆寫此 CMD（指定 --port 8000）。
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1"]

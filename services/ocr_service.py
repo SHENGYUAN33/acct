@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from io import BytesIO
 from pathlib import Path
 
 from google import genai
@@ -11,6 +12,7 @@ from PIL import Image
 from core.config import settings
 from core.expense_categories import build_ocr_prompt_list
 from schemas.ocr import VoucherOCRResult
+from services import object_storage
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +246,10 @@ async def classify_and_extract(image_path: str | Path | dict | list) -> VoucherO
     """
     resolved_path = _extract_image_path(image_path)
     try:
-        with Image.open(resolved_path) as img:
+        data = object_storage.get_bytes(str(resolved_path))
+        if data is None:
+            raise FileNotFoundError(f"找不到圖片：{resolved_path}")
+        with Image.open(BytesIO(data)) as img:
             response = await _client.aio.models.generate_content(
                 model=settings.gemini_model,
                 contents=[_build_prompt(), img],
