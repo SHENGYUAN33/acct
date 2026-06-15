@@ -19,7 +19,7 @@ def upgrade() -> None:
     op.execute("""
         UPDATE expenses
         SET display_order = NULL
-        WHERE status = 'REPLACED_VOID'
+        WHERE status::text = 'REPLACED_VOID'
           AND display_order IS NOT NULL
     """)
 
