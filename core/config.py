@@ -43,8 +43,10 @@ class Settings(BaseSettings):
     # Cloud Scheduler 呼叫 /api/v1/admin/cleanup-liff 時驗證用的共享密鑰（空字串 = 停用該端點）
     cleanup_token: str = ""
 
-    # CORS：production 時填入允許的 origin 清單（逗號分隔或 JSON array）
-    cors_origins: list[str] = []
+    # CORS：production 時填入允許的 origin 清單（逗號分隔或 JSON array 字串）
+    # 使用 str 型別，避免 pydantic-settings 在 source 層對 list 欄位強制 json.loads
+    # 解析由 main.py 的 _parse_cors_origins() 負責
+    cors_origins: str = ""
 
     # 圖片上傳大小上限（bytes），預設 10MB
     max_upload_bytes: int = 10 * 1024 * 1024
@@ -97,16 +99,6 @@ class Settings(BaseSettings):
         "收音組", "劇本組", "導演組", "演員組", "航拍組",
         "檔案管理組", "後期剪輯", "後期特效", "公司組",
     ]
-
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, v: object) -> list[str]:
-        if isinstance(v, str):
-            stripped = v.strip()
-            if stripped.startswith("["):
-                return json.loads(stripped)
-            return [o.strip() for o in stripped.split(",") if o.strip()]
-        return v
 
     @field_validator("departments", mode="before")
     @classmethod
