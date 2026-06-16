@@ -272,7 +272,6 @@ async def classify_and_extract(image_path: str | Path | dict | list) -> VoucherO
         is_credit = (
             result.is_voucher
             and result.voucher_category in ("RETURN", "CREDIT_NOTE")
-            and result.original_invoice_number
         )
         if is_credit and result.total_amount is not None and result.total_amount > 0:
             result.total_amount = -result.total_amount
@@ -310,6 +309,7 @@ async def classify_and_extract_with_retry(
     Returns:
         VoucherOCRResult
     """
+    max_retries = int(max_retries)
     result = VoucherOCRResult(is_voucher=False, success=False, error="未執行")
     for attempt in range(max_retries):
         async with _get_semaphore():

@@ -27,6 +27,7 @@ sys.modules.setdefault("psycopg2.extras", MagicMock())
 # 標準 import
 # ---------------------------------------------------------------------------
 
+import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -149,10 +150,10 @@ class TestAddImage:
         session = self._make_uploading_session()
         db = self._make_db(session)
 
-        img_record, ocr_completed, is_voucher = liff_service.add_image(
+        img_record, ocr_completed, is_voucher = asyncio.run(liff_service.add_image(
             db=db, session_id=session.id,
             upload_file=MagicMock(), sequence_order=0,
-        )
+        ))
 
         assert ocr_completed is False
         assert is_voucher is None
@@ -163,10 +164,10 @@ class TestAddImage:
         session = self._make_uploading_session()
         db = self._make_db(session)
 
-        img_record, _, _ = liff_service.add_image(
+        img_record, _, _ = asyncio.run(liff_service.add_image(
             db=db, session_id=session.id,
             upload_file=MagicMock(), sequence_order=2,
-        )
+        ))
 
         assert img_record.image_path == "uploads/uuid-abc.jpg"
         assert img_record.sequence_order == 2
@@ -179,10 +180,10 @@ class TestAddImage:
         db = self._make_db(session)
 
         with patch("services.liff_service.ocr_service") as mock_ocr:
-            liff_service.add_image(
+            asyncio.run(liff_service.add_image(
                 db=db, session_id=session.id,
                 upload_file=MagicMock(), sequence_order=0,
-            )
+            ))
             mock_ocr.classify_and_extract_with_retry.assert_not_called()
             mock_ocr.classify_and_extract.assert_not_called()
 
@@ -193,10 +194,10 @@ class TestAddImage:
         db = self._make_db(session)
 
         with pytest.raises(HTTPException) as exc_info:
-            liff_service.add_image(
+            asyncio.run(liff_service.add_image(
                 db=db, session_id=session.id,
                 upload_file=MagicMock(), sequence_order=1,
-            )
+            ))
         assert exc_info.value.status_code == 422
         assert "sequence_order=1" in exc_info.value.detail
 
@@ -205,10 +206,10 @@ class TestAddImage:
         db = self._make_db(session=None)
 
         with pytest.raises(HTTPException) as exc_info:
-            liff_service.add_image(
+            asyncio.run(liff_service.add_image(
                 db=db, session_id=uuid.uuid4(),
                 upload_file=MagicMock(), sequence_order=0,
-            )
+            ))
         assert exc_info.value.status_code == 404
 
     def test_expired_session_raises_410(self):
@@ -217,10 +218,10 @@ class TestAddImage:
         db = self._make_db(session)
 
         with pytest.raises(HTTPException) as exc_info:
-            liff_service.add_image(
+            asyncio.run(liff_service.add_image(
                 db=db, session_id=session.id,
                 upload_file=MagicMock(), sequence_order=0,
-            )
+            ))
         assert exc_info.value.status_code == 410
 
     def test_submitted_session_raises_409(self):
@@ -229,10 +230,10 @@ class TestAddImage:
         db = self._make_db(session)
 
         with pytest.raises(HTTPException) as exc_info:
-            liff_service.add_image(
+            asyncio.run(liff_service.add_image(
                 db=db, session_id=session.id,
                 upload_file=MagicMock(), sequence_order=0,
-            )
+            ))
         assert exc_info.value.status_code == 409
 
 
