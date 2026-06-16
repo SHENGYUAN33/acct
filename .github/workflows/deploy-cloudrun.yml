@@ -1,0 +1,322 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GCP_REGION: ${{ secrets.GCP_REGION }}
+  AR_REPO: ${{ secrets.AR_REPO }}
+  SERVICE: ${{ secrets.CLOUD_RUN_SERVICE }}
+
+jobs:
+  # ── Job 1: 單元測試 ────────────────────────────────────────────────
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run backend pytest (SQLite)
+        run: pytest tests/ --ignore=tests/postgres/ --tb=short -q
+        env:
+          DATABASE_URL: sqlite:///file::memory:?cache=shared&uri=true
+          LINE_CHANNEL_SECRET: test-secret-32chars-placeholder00
+          LINE_CHANNEL_ACCESS_TOKEN: test-token
+          GEMINI_API_KEY: test-key
+          JWT_SECRET: test-jwt-secret-for-ci-only-not-production
+          APP_ENV: development
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend unit tests (Vitest)
+        working-directory: frontend
+        run: npm test
+
+  # ── Job 2: PostgreSQL 整合測試 ─────────────────────────────────────
+  integration-test:
+    name: Integration Tests (PostgreSQL)
+    needs: test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: acctassist_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in $(seq 1 20); do
+            pg_isready -h localhost -p 5432 -U testuser && echo "PG ready" && break
+            echo "Waiting for PG... attempt $i"
+            sleep 2
+          done
+
+      - name: Run Alembic migrations on test DB
+        run: alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+psycopg2://testuser:testpassword@localhost:5432/acctassist_test
+
+      - name: Run PostgreSQL integration tests
+        run: pytest tests/postgres/ -v --tb=short -q
+        env:
+          DATABASE_URL: postgresql+psycopg2://testuser:testpassword@localhost:5432/acctassist_test
+          LINE_CHANNEL_SECRET: test-secret-32chars-placeholder00
+          LINE_CHANNEL_ACCESS_TOKEN: test-token
+          GEMINI_API_KEY: test-key
+          JWT_SECRET: test-jwt-secret-for-ci-only-not-production
+          APP_ENV: development
+
+  # ── Job 3: 建置後端 Docker image 並推送 Artifact Registry ──────────
+  build-backend:
+    name: Build & Push Backend Image
+    needs: [test, integration-test]
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Compute image tag
+        id: meta
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
+          IMAGE="${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.AR_REPO }}/backend"
+          echo "image_tag=${IMAGE}:${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "image_latest=${IMAGE}:latest" >> $GITHUB_OUTPUT
+
+      - name: Build & push Docker image
+        run: |
+          docker build \
+            --tag "${{ steps.meta.outputs.image_tag }}" \
+            --tag "${{ steps.meta.outputs.image_latest }}" \
+            --file Dockerfile \
+            .
+          docker push "${{ steps.meta.outputs.image_tag }}"
+          docker push "${{ steps.meta.outputs.image_latest }}"
+
+  # ── Job 4: 建置前端 Vue SPA ──────────────────────────────────────
+  build-frontend:
+    name: Build Frontend
+    needs: [test, integration-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Write root .env for Vite build
+        run: |
+          cat > .env << EOF
+          VITE_API_BASE_URL=${{ secrets.VITE_API_BASE_URL }}
+          VITE_ENABLE_PROCESS_PENDING=false
+          VITE_ENABLE_SCHEDULER_CONFIG=false
+          VITE_ENABLE_DUPLICATE_DETECTION=true
+          EOF
+
+      - name: Install & build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 1
+
+  # ── Job 5: DB Migration（Cloud Run Job）────────────────────────────
+  migrate:
+    name: DB Migration
+    needs: build-backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Run Alembic migration via Cloud Run Job
+        run: |
+          gcloud run jobs deploy acctassist-migrate \
+            --image="${{ needs.build-backend.outputs.image_tag }}" \
+            --region="${{ secrets.GCP_REGION }}" \
+            --service-account="${{ secrets.RUN_SA_EMAIL }}" \
+            --set-cloudsql-instances="${{ secrets.SQL_CONN }}" \
+            --set-secrets="DATABASE_URL=DATABASE_URL:latest" \
+            --command="alembic" \
+            --args="upgrade,head" \
+            --max-retries=0 \
+            --quiet
+          gcloud run jobs execute acctassist-migrate \
+            --region="${{ secrets.GCP_REGION }}" \
+            --wait
+
+  # ── Job 6: 部署後端到 Cloud Run ───────────────────────────────────
+  deploy-backend:
+    name: Deploy Backend to Cloud Run
+    needs: [build-backend, migrate]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Prepare cloudrun.env.yaml
+        run: |
+          sed -i "s|REPLACE_GCS_BUCKET|${{ secrets.GCS_BUCKET }}|g" cloudrun.env.yaml
+          sed -i "s|REPLACE_CORS_ORIGINS|${{ secrets.CORS_ORIGINS }}|g" cloudrun.env.yaml
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "${{ secrets.CLOUD_RUN_SERVICE }}" \
+            --image="${{ needs.build-backend.outputs.image_tag }}" \
+            --region="${{ secrets.GCP_REGION }}" \
+            --service-account="${{ secrets.RUN_SA_EMAIL }}" \
+            --add-cloudsql-instances="${{ secrets.SQL_CONN }}" \
+            --env-vars-file=cloudrun.env.yaml \
+            --set-secrets="DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,LINE_CHANNEL_SECRET=LINE_CHANNEL_SECRET:latest,LINE_CHANNEL_ACCESS_TOKEN=LINE_CHANNEL_ACCESS_TOKEN:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,CLEANUP_TOKEN=CLEANUP_TOKEN:latest" \
+            --no-cpu-throttling \
+            --cpu=1 \
+            --memory=1Gi \
+            --min-instances=0 \
+            --max-instances=4 \
+            --concurrency=20 \
+            --timeout=300 \
+            --allow-unauthenticated \
+            --quiet
+
+      - name: Health check
+        run: |
+          RUN_URL=$(gcloud run services describe "${{ secrets.CLOUD_RUN_SERVICE }}" \
+            --region="${{ secrets.GCP_REGION }}" \
+            --format='value(status.url)')
+          for i in $(seq 1 10); do
+            STATUS=$(curl -sf "${RUN_URL}/health" \
+              | python3 -c 'import sys,json; print(json.load(sys.stdin)["status"])' 2>/dev/null \
+              || echo 'error')
+            if [ "$STATUS" = "success" ]; then
+              echo "[OK] Health check passed (attempt $i)"
+              echo "RUN_URL=${RUN_URL}" >> $GITHUB_STEP_SUMMARY
+              exit 0
+            fi
+            echo "[..] Attempt $i/10 — waiting 5s"
+            sleep 5
+          done
+          echo "[ERROR] Health check failed"
+          exit 1
+
+  # ── Job 7: 部署前端到 Firebase Hosting ───────────────────────────
+  deploy-frontend:
+    name: Deploy Frontend to Firebase Hosting
+    needs: [build-frontend, deploy-backend]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download frontend dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Deploy to Firebase Hosting
+        run: firebase deploy --only hosting --project ${{ secrets.GCP_PROJECT_ID }}
+        working-directory: frontend
+
+  # ── 部署摘要 ────────────────────────────────────────────────────────
+  summary:
+    name: Deployment Summary
+    needs: [deploy-backend, deploy-frontend]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Write summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend | Cloud Run — ${{ needs.deploy-backend.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | Firebase Hosting — ${{ needs.deploy-frontend.result }} |" >> $GITHUB_STEP_SUMMARY
