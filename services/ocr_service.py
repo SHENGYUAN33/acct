@@ -19,15 +19,6 @@ logger = logging.getLogger(__name__)
 # Initialise Gemini client once at import time
 _client = genai.Client(api_key=settings.gemini_api_key)
 
-# 最多同時送出的 Gemini 請求數（由 OCR_MAX_CONCURRENT 控制，延遲初始化避免測試 mock 問題）
-_OCR_SEMAPHORE: asyncio.Semaphore | None = None
-
-
-def _get_semaphore() -> asyncio.Semaphore:
-    global _OCR_SEMAPHORE
-    if _OCR_SEMAPHORE is None:
-        _OCR_SEMAPHORE = asyncio.Semaphore(int(settings.ocr_max_concurrent))
-    return _OCR_SEMAPHORE
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
 
@@ -310,9 +301,10 @@ async def classify_and_extract_with_retry(
         VoucherOCRResult
     """
     max_retries = int(max_retries)
+    semaphore = asyncio.Semaphore(int(settings.ocr_max_concurrent))
     result = VoucherOCRResult(is_voucher=False, success=False, error="未執行")
     for attempt in range(max_retries):
-        async with _get_semaphore():
+        async with semaphore:
             result = await classify_and_extract(image_path)
         if result.success:
             return result

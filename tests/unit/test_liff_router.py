@@ -292,11 +292,11 @@ class TestUploadImage:
         assert resp.status_code == 201
 
     def test_upload_non_image_content_type_returns_415(self, client):
-        """上傳非圖片（如 PDF）應被路由層拒絕，回傳 415 Unsupported Media Type。"""
+        """上傳非圖片非 PDF（如 text/plain）應被路由層拒絕，回傳 415 Unsupported Media Type。"""
         resp = self._upload(
             client, SESSION_ID,
-            file_content=b"%PDF-1.4",
-            content_type="application/pdf",
+            file_content=b"hello world",
+            content_type="text/plain",
         )
         assert resp.status_code == 415
 
