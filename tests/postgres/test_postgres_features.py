@@ -153,11 +153,13 @@ class TestAlembicMigrations:
         from alembic import command
         from alembic.config import Config
 
-        _truncate_public_tables(pg_engine)
+        # 直接 drop/recreate schema，避免呼叫 downgrade（部分 migration 不支援）
+        with pg_engine.begin() as conn:
+            conn.execute(text("DROP SCHEMA public CASCADE"))
+            conn.execute(text("CREATE SCHEMA public"))
 
         alembic_cfg = Config("alembic.ini")
         alembic_cfg.set_main_option("sqlalchemy.url", str(pg_engine.url))
-        command.downgrade(alembic_cfg, "base")
         command.upgrade(alembic_cfg, "head")
 
         with pg_engine.connect() as conn:
