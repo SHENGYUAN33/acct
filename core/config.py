@@ -98,6 +98,16 @@ class Settings(BaseSettings):
         "檔案管理組", "後期剪輯", "後期特效", "公司組",
     ]
 
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: object) -> list[str]:
+        if isinstance(v, str):
+            stripped = v.strip()
+            if stripped.startswith("["):
+                return json.loads(stripped)
+            return [o.strip() for o in stripped.split(",") if o.strip()]
+        return v
+
     @field_validator("departments", mode="before")
     @classmethod
     def parse_departments(cls, v: object) -> list[str]:
