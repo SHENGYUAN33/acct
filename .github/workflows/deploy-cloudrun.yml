@@ -129,42 +129,23 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Debug - verify gcloud identity and AR access
+      - name: Debug - verify identity and AR path
         run: |
           echo "=== gcloud auth list ==="
           gcloud auth list
-          echo "=== tokeninfo ==="
+          echo "=== Active account token ==="
           TOKEN=$(gcloud auth print-access-token)
           curl -s "https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${TOKEN}" | python3 -m json.tool || true
-          echo "=== AR repository API test ==="
-          curl -s -w "\nHTTP_STATUS:%{http_code}" \
+          echo "=== AR repository check (should return 200) ==="
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer ${TOKEN}" \
-            "https://artifactregistry.googleapis.com/v1/projects/${{ secrets.GCP_PROJECT_ID }}/locations/${{ secrets.GCP_REGION }}/repositories/${{ secrets.AR_REPO }}" \
-            | python3 -m json.tool || true
-          echo "=== Docker config (auths masked) ==="
-          python3 -c "
-import json
-try:
-    with open('/home/runner/.docker/config.json') as f:
-        cfg = json.load(f)
-    if 'auths' in cfg:
-        for k in cfg['auths']:
-            cfg['auths'][k] = '(masked)'
-    print(json.dumps(cfg, indent=2))
-except FileNotFoundError:
-    print('No pre-existing docker config')
-except Exception as e:
-    print(f'Error: {e}')
-" || true
+            "https://artifactregistry.googleapis.com/v1/projects/${{ secrets.GCP_PROJECT_ID }}/locations/${{ secrets.GCP_REGION }}/repositories/${{ secrets.AR_REPO }}")
+          echo "HTTP status: ${HTTP_CODE}"
+          echo "=== Image will be pushed to ==="
+          echo "${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.AR_REPO }}/backend"
 
-      - name: Login to Artifact Registry (isolated config)
-        run: |
-          mkdir -p /tmp/docker-config
-          gcloud auth print-access-token | \
-            docker --config /tmp/docker-config login \
-              -u oauth2accesstoken \
-              --password-stdin \
-              ${{ secrets.GCP_REGION }}-docker.pkg.dev
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev --quiet
 
       - name: Compute image tag
         id: meta
@@ -181,8 +162,8 @@ except Exception as e:
             --tag "${{ steps.meta.outputs.image_latest }}" \
             --file Dockerfile \
             .
-          docker --config /tmp/docker-config push "${{ steps.meta.outputs.image_tag }}"
-          docker --config /tmp/docker-config push "${{ steps.meta.outputs.image_latest }}"
+          docker push "${{ steps.meta.outputs.image_tag }}"
+          docker push "${{ steps.meta.outputs.image_latest }}"
 
   # ── Job 4: 建置前端 Vue SPA ──────────────────────────────────────
   build-frontend:
