@@ -15,15 +15,16 @@ export const OFFICIAL_VOUCHER_CATEGORIES = [
   { value: 'OTHER',      label: '其他' },
 ]
 
-/** key → label 映射（僅現行官方代碼） */
+/** key → label 映射（現行官方代碼 + 舊代碼 fallback） */
 export const VOUCHER_LABEL_MAP = {
-  INVOICE:     '發票',
-  RECEIPT:     '收據',
-  LABOR_FORM:  '勞保',
-  DEPOSIT:     '押金',
-  RETURN:      '退貨',
-  CREDIT_NOTE: '退貨',  // 舊資料相容：OCR 舊版存 CREDIT_NOTE，顯示同 RETURN
-  OTHER:       '其他',
+  INVOICE:        '發票',
+  RECEIPT:        '收據',
+  LABOR_FORM:     '勞保',
+  DEPOSIT:        '押金',
+  RETURN:         '退貨',
+  CREDIT_NOTE:    '退貨',        // 舊資料相容：OCR 舊版存 CREDIT_NOTE，顯示同 RETURN
+  TRANSPORTATION: '交通費',      // 舊資料相容：OCR 舊版存 TRANSPORTATION
+  OTHER:          '其他',
 }
 
 /** key → label；未知 key 原樣回傳 */
