@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write   # Workload Identity Federation 需要此權限注入 OIDC token
+
 env:
   GCP_REGION: ${{ secrets.GCP_REGION }}
   AR_REPO: ${{ secrets.AR_REPO }}
