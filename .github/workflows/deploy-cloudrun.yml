@@ -238,8 +238,10 @@ jobs:
 
       - name: Run Alembic migration via Cloud Run Job
         run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
+          IMAGE="${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.AR_REPO }}/backend:${SHORT_SHA}"
           gcloud run jobs deploy acctassist-migrate \
-            --image="${{ needs.build-backend.outputs.image_tag }}" \
+            --image="${IMAGE}" \
             --region="${{ secrets.GCP_REGION }}" \
             --service-account="${{ secrets.RUN_SA_EMAIL }}" \
             --set-cloudsql-instances="${{ secrets.SQL_CONN }}" \
@@ -277,8 +279,10 @@ jobs:
 
       - name: Deploy to Cloud Run
         run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
+          IMAGE="${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.AR_REPO }}/backend:${SHORT_SHA}"
           gcloud run deploy "${{ secrets.CLOUD_RUN_SERVICE }}" \
-            --image="${{ needs.build-backend.outputs.image_tag }}" \
+            --image="${IMAGE}" \
             --region="${{ secrets.GCP_REGION }}" \
             --service-account="${{ secrets.RUN_SA_EMAIL }}" \
             --add-cloudsql-instances="${{ secrets.SQL_CONN }}" \
