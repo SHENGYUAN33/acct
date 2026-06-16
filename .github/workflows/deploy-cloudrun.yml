@@ -133,14 +133,33 @@ jobs:
         run: |
           echo "=== gcloud auth list ==="
           gcloud auth list
-          echo "=== Active account token ==="
+          echo "=== gcloud configured project ==="
+          GCLOUD_PROJECT=$(gcloud config get-value project 2>/dev/null)
+          echo "gcloud project: ${GCLOUD_PROJECT}"
+          echo "=== Project ID match check ==="
+          if [ "${GCLOUD_PROJECT}" = "${{ secrets.GCP_PROJECT_ID }}" ]; then
+            echo "OK: GCP_PROJECT_ID secret matches gcloud project"
+          else
+            echo "MISMATCH! GCP_PROJECT_ID secret does NOT match gcloud project"
+            echo "This means the image is being pushed to the wrong project path!"
+          fi
+          echo "=== AR describe via gcloud (uses gcloud project) ==="
+          gcloud artifacts repositories describe ${{ secrets.AR_REPO }} \
+            --location=${{ secrets.GCP_REGION }} || true
+          echo "=== AR describe via secret project ID ==="
+          gcloud artifacts repositories describe ${{ secrets.AR_REPO }} \
+            --location=${{ secrets.GCP_REGION }} \
+            --project=${{ secrets.GCP_PROJECT_ID }} || true
+          echo "=== AR repository check via REST (should return 200) ==="
           TOKEN=$(gcloud auth print-access-token)
-          curl -s "https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${TOKEN}" | python3 -m json.tool || true
-          echo "=== AR repository check (should return 200) ==="
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer ${TOKEN}" \
             "https://artifactregistry.googleapis.com/v1/projects/${{ secrets.GCP_PROJECT_ID }}/locations/${{ secrets.GCP_REGION }}/repositories/${{ secrets.AR_REPO }}")
-          echo "HTTP status: ${HTTP_CODE}"
+          echo "HTTP status with GCP_PROJECT_ID: ${HTTP_CODE}"
+          HTTP_CODE2=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "https://artifactregistry.googleapis.com/v1/projects/${GCLOUD_PROJECT}/locations/${{ secrets.GCP_REGION }}/repositories/${{ secrets.AR_REPO }}")
+          echo "HTTP status with gcloud project: ${HTTP_CODE2}"
           echo "=== Image will be pushed to ==="
           echo "${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.AR_REPO }}/backend"
 
