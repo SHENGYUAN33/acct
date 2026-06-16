@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 # Initialise Gemini client once at import time
 _client = genai.Client(api_key=settings.gemini_api_key)
 
+# Semaphore 限制 OCR 並行數量。預設為 None（函式內建立）。
+# 測試可 patch 此變數注入當前 event loop 的 Semaphore，避免跨 event loop 錯誤。
+_OCR_SEMAPHORE: asyncio.Semaphore | None = None
+
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
 
@@ -283,7 +287,7 @@ async def classify_and_extract(image_path: str | Path | dict | list) -> VoucherO
 
 async def classify_and_extract_with_retry(
     image_path: str | Path,
-    max_retries: int = settings.ocr_max_retries,
+    max_retries: int = 3,
 ) -> VoucherOCRResult:
     """
     帶指數退避 retry 的 OCR 入口，同時受 _OCR_SEMAPHORE 限制並行數量。
@@ -301,7 +305,7 @@ async def classify_and_extract_with_retry(
         VoucherOCRResult
     """
     max_retries = int(max_retries)
-    semaphore = asyncio.Semaphore(int(settings.ocr_max_concurrent))
+    semaphore = _OCR_SEMAPHORE if _OCR_SEMAPHORE is not None else asyncio.Semaphore(int(settings.ocr_max_concurrent))
     result = VoucherOCRResult(is_voucher=False, success=False, error="未執行")
     for attempt in range(max_retries):
         async with semaphore:
