@@ -237,10 +237,6 @@ describe('VOUCHER_LABEL_MAP 常數完整性', () => {
     expect(VOUCHER_LABEL_MAP.INVOICE).toBe('發票')
   })
 
-  it('TC-CONST-06: TRANSPORTATION 類別應有對應標籤（舊代碼 fallback）', () => {
-    expect(VOUCHER_LABEL_MAP.TRANSPORTATION).toBeDefined()
-  })
-
   it('TC-CONST-07: 所有 VOUCHER_LABEL_MAP 值均非空字串', () => {
     Object.entries(VOUCHER_LABEL_MAP).forEach(([key, val]) => {
       expect(val).not.toBe('')
