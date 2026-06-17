@@ -239,9 +239,19 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Prepare cloudrun.env.yaml
+        env:
+          GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
+          CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
         run: |
-          sed -i "s|REPLACE_GCS_BUCKET|${{ secrets.GCS_BUCKET }}|g" cloudrun.env.yaml
-          sed -i "s|REPLACE_CORS_ORIGINS|${{ secrets.CORS_ORIGINS }}|g" cloudrun.env.yaml
+          python3 - <<'EOF'
+          import os
+          with open('cloudrun.env.yaml', 'r') as f:
+              content = f.read()
+          content = content.replace('REPLACE_GCS_BUCKET', os.environ['GCS_BUCKET'].strip())
+          content = content.replace('REPLACE_CORS_ORIGINS', os.environ['CORS_ORIGINS'].strip())
+          with open('cloudrun.env.yaml', 'w') as f:
+              f.write(content)
+          EOF
 
       - name: Deploy to Cloud Run
         run: |
