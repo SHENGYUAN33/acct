@@ -342,7 +342,8 @@ def auto_link_records(
     任何例外只 log，不影響已提交的新報帳。
     """
     try:
-        # 待退貨偵測（enable_waiting_return_text_mode=True 時生效）
+        # 待退貨補件文字偵測（enable_waiting_return_text_mode=True 時生效）
+        # 注意：WAITING_RETURN 原始憑證標記已改由 LIFF 按鈕觸發（is_waiting_return），不再依賴備註文字
         if settings.enable_waiting_return_text_mode:
             rs_invoice = _detect_return_supplement_invoice(user_description)
             if rs_invoice:
@@ -353,16 +354,6 @@ def auto_link_records(
                 logger.info(
                     "auto_link_records RETURN_SUPPLEMENT: new=%s invoice=%s",
                     new_expense.serial_number, rs_invoice,
-                )
-                db.refresh(new_expense)
-                return new_expense
-            elif detect_waiting_return(user_description):
-                # 「待退貨」無發票號碼 → 原始待退貨憑證
-                new_expense.status = ExpenseStatus.WAITING_RETURN
-                db.commit()
-                logger.info(
-                    "auto_link_records WAITING_RETURN: new=%s",
-                    new_expense.serial_number,
                 )
                 db.refresh(new_expense)
                 return new_expense

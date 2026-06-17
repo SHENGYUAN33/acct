@@ -42,11 +42,21 @@ def _parse_cors_origins(raw: str) -> list[str]:
     return [o.strip() for o in raw.split(",") if o.strip()]
 
 
-_cors_origins = ["*"] if settings.app_env == "development" else _parse_cors_origins(settings.cors_origins)
+if settings.app_env == "development":
+    _cors_origins = []
+    _cors_origin_regex = r"http://localhost(:\d+)?"
+else:
+    parsed = _parse_cors_origins(settings.cors_origins)
+    _cors_origins = parsed if parsed else ["*"]
+    _cors_origin_regex = None
+
+_cors_credentials = settings.app_env == "development" or bool(_parse_cors_origins(settings.cors_origins))
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_origin_regex=_cors_origin_regex,
+    allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -320,6 +320,7 @@ async def process_session_background(
     session_id: uuid.UUID,
     group_descriptions: dict[int, str],
     waiting_return_ref: str | None,
+    is_waiting_return: bool = False,
     is_return_supplement: bool = False,
     wr_original_invoice: str | None = None,
     wr_original_date: str | None = None,
@@ -492,10 +493,11 @@ async def process_session_background(
                     uploader_dept=uploader_dept,
                     trigger_by="liff",
                     group_id=batch_group_id,
-                    skip_auto_link=is_return_supplement,
+                    skip_auto_link=is_return_supplement or is_waiting_return,
                 )
-                # 備註含「待退貨」關鍵字 → 憑證類別覆寫為 RETURN
-                if relation_service.detect_waiting_return(description):
+                # LIFF 待退貨按鈕 → status 覆寫為 WAITING_RETURN + 憑證類別標記 RETURN
+                if is_waiting_return:
+                    expense.status = ExpenseStatus.WAITING_RETURN
                     expense.voucher_categories = json.dumps(["RETURN"])
                     db.commit()
 

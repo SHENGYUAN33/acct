@@ -239,6 +239,7 @@ def submit_session(
         session_id=session_id,
         group_descriptions=desc_map,
         waiting_return_ref=body.waiting_return_ref,
+        is_waiting_return=body.is_waiting_return,
         is_return_supplement=body.is_return_supplement,
         wr_original_invoice=body.wr_original_invoice,
         wr_original_date=body.wr_original_date,

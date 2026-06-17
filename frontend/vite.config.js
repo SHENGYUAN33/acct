@@ -3,6 +3,8 @@ import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath, URL } from 'node:url'
 
+const isDev = process.env.NODE_ENV !== 'production'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
@@ -16,4 +18,12 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  server: isDev ? {
+    proxy: {
+      '/api': 'http://localhost:8000',
+      '/webhook': 'http://localhost:8000',
+      '/health': 'http://localhost:8000',
+      '/uploads': 'http://localhost:8000',
+    },
+  } : {},
 })

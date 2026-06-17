@@ -113,6 +113,10 @@ class SubmitSessionRequest(BaseModel):
         default=None,
         description="[舊版] 待退貨原始憑證號碼（向後相容保留，新版請用 is_return_supplement）",
     )
+    is_waiting_return: bool = Field(
+        default=False,
+        description="此費用為待退貨原始憑證（LIFF 待退貨按鈕觸發，status→WAITING_RETURN）",
+    )
     is_return_supplement: bool = Field(
         default=False,
         description="此次上傳為退貨補件（勾選後系統依 OCR 結果與填寫欄位自動判斷情境）",

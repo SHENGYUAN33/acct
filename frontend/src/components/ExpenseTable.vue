@@ -5,9 +5,9 @@ import { getExpense, fetchExpenses, fetchRelatedExpenses, resolveDuplicate, upda
 import { fetchVoucherCategories } from '../api/configApi'
 import { VOUCHER_LABEL_MAP } from '../constants/voucher.js'
 import { toast } from 'vue3-toastify'
-import { Pencil, Trash2, Plus, ChevronsUpDown, ChevronRight, Link2, GripVertical, Unlink2, Loader2 } from 'lucide-vue-next'
+import { Pencil, Trash2, Plus, ChevronsUpDown, ChevronRight, Link2, GripVertical, Unlink2 } from 'lucide-vue-next'
 import { getStatusConfig } from '../constants/status.js'
-import { getRelationTypeConfig, EDITABLE_RELATION_TYPES, RELATION_TYPE_OPTIONS } from '../constants/relationType.js'
+import { getRelationTypeConfig, EDITABLE_RELATION_TYPES } from '../constants/relationType.js'
 import ConfirmModal from './ConfirmModal.vue'
 import BatchGroupModal from './BatchGroupModal.vue'
 import { secureImgUrl, isViewableImage } from '../utils/imageUrl'
@@ -68,51 +68,6 @@ watch(() => store.expenses, async () => {
   }
 })
 
-// ── 補件類型 inline 下拉
-const relationTypeDropdownId = ref(null)
-const updatingRelTypeId = ref(null)
-const dropdownPos = ref({ top: 0, left: 0 })
-const dropdownExpense = ref(null)
-
-function openRelTypeDropdown(event, expense) {
-  if (relationTypeDropdownId.value === expense.id) {
-    relationTypeDropdownId.value = null
-    dropdownExpense.value = null
-    return
-  }
-  const rect = event.currentTarget.getBoundingClientRect()
-  dropdownPos.value = { top: rect.bottom + 2, left: rect.left }
-  dropdownExpense.value = expense
-  relationTypeDropdownId.value = expense.id
-}
-
-
-async function changeRelationType(expense, newType) {
-  relationTypeDropdownId.value = null
-  if (newType === expense.relation_type) return
-  updatingRelTypeId.value = expense.id
-  try {
-    const ops = []
-    const baseUpdate = { relation_type: newType, dismissed_from_waiting_return: false }
-    if (['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE'].includes(newType)) baseUpdate.voucher_categories = JSON.stringify(['RETURN'])
-    ops.push(apiUpdateExpense(expense.id, baseUpdate))
-    // 原類型是 VOID_REPLACE 且已配對 → 還原 parent（回到待退貨、清除沖銷標記）
-    if (expense.relation_type === 'VOID_REPLACE' && expense.parent_id) {
-      ops.push(apiUpdateExpense(expense.parent_id, { relation_type: null, status: 'WAITING_RETURN' }))
-    }
-    // 新類型是 VOID_REPLACE 且已配對 → 把 parent 標記為 VOID_ORIGINAL
-    if (newType === 'VOID_REPLACE' && expense.parent_id) {
-      ops.push(apiUpdateExpense(expense.parent_id, { relation_type: 'VOID_ORIGINAL', status: 'PENDING' }))
-    }
-    await Promise.all(ops)
-    await store.fetchExpenses()
-    toast.success('補件類型已更新')
-  } catch {
-    toast.error('更新失敗，請稍後再試')
-  } finally {
-    updatingRelTypeId.value = null
-  }
-}
 
 // 批次組 Modal
 const batchModalExpenseId = ref(null)
@@ -537,21 +492,12 @@ async function handleUnlinkSupplement(parentExpense, sup) {
                     class="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 border border-red-200"
                     :title="`此憑證已被換單取代，CSV 匯出顯示負數${expense.void_reason ? '（' + expense.void_reason + '）' : ''}`"
                   >沖銷</span>
-                  <!-- 可修改的補件類型 badge（點擊展開下拉，下拉透過 Teleport 避免被後面的 tr 蓋住） -->
+                  <!-- 補件類型 badge（純顯示） -->
                   <template v-else-if="EDITABLE_RELATION_TYPES.includes(expense.relation_type)">
-                    <button
-                      @click.stop="openRelTypeDropdown($event, expense)"
-                      :disabled="updatingRelTypeId === expense.id"
-                      class="text-[10px] px-1.5 py-0.5 rounded border cursor-pointer hover:opacity-75 transition-opacity disabled:opacity-50 flex items-center gap-0.5"
+                    <span
+                      class="text-[10px] px-1.5 py-0.5 rounded border"
                       :class="getRelationTypeConfig(expense.relation_type)?.badgeClass"
-                      title="點擊可修改補件類型"
-                    >
-                      <Loader2 v-if="updatingRelTypeId === expense.id" :size="10" class="animate-spin" />
-                      <template v-else>
-                        {{ getRelationTypeConfig(expense.relation_type)?.label }}
-                        <span class="opacity-50 text-[9px]">▾</span>
-                      </template>
-                    </button>
+                    >{{ getRelationTypeConfig(expense.relation_type)?.label }}</span>
                   </template>
                   <span
                     v-if="!expense.is_active"
@@ -934,35 +880,6 @@ async function handleUnlinkSupplement(parentExpense, sup) {
       </table>
     </div>
   </div>
-
-  <!-- 補件類型下拉（fixed 定位，避免被後面的 tr 蓋住） -->
-  <Teleport to="body">
-    <div
-      v-if="relationTypeDropdownId && dropdownExpense"
-      class="fixed inset-0 z-[98]"
-      @click="relationTypeDropdownId = null; dropdownExpense = null"
-    />
-    <div
-      v-if="relationTypeDropdownId && dropdownExpense"
-      class="fixed z-[99] bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden"
-      :style="{ top: dropdownPos.top + 'px', left: dropdownPos.left + 'px', minWidth: '92px' }"
-      @click.stop
-    >
-      <button
-        v-for="opt in RELATION_TYPE_OPTIONS"
-        :key="opt.value"
-        @click="changeRelationType(dropdownExpense, opt.value)"
-        class="w-full text-left text-[11px] px-2.5 py-1.5 transition-colors flex items-center gap-1.5"
-        :class="[opt.optionClass, (dropdownExpense.relation_type === opt.value || (dropdownExpense.relation_type === 'SUPPLEMENT' && opt.value === 'RETURN_SUPPLEMENT')) ? 'font-semibold' : 'text-gray-600']"
-      >
-        <span
-          class="w-1.5 h-1.5 rounded-full inline-block shrink-0"
-          :class="(dropdownExpense.relation_type === opt.value || (dropdownExpense.relation_type === 'SUPPLEMENT' && opt.value === 'RETURN_SUPPLEMENT')) ? 'bg-current' : 'border border-gray-300'"
-        />
-        {{ opt.label }}
-      </button>
-    </div>
-  </Teleport>
 
   <!-- 刪除確認 Modal -->
   <ConfirmModal

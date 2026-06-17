@@ -2,7 +2,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { X, Loader2, PackageX, CheckCircle2, ChevronRight, ChevronDown, Search, Link2, Unlink2, Trash2, SlidersHorizontal, Plus } from 'lucide-vue-next'
 import { getStatusConfig } from '../constants/status.js'
-import { getRelationTypeConfig, SUPPLEMENT_RELATION_TYPES, RELATION_TYPE_OPTIONS } from '../constants/relationType.js'
+import { getRelationTypeConfig, SUPPLEMENT_RELATION_TYPES, RELATION_TYPE_OPTIONS, EDITABLE_RELATION_TYPES } from '../constants/relationType.js'
 import { fetchWaitingReturns, fetchExpenses, fetchRelatedExpenses, updateExpense, pairExpense } from '../api/expenseApi'
 import { fetchVoucherCategories, fetchDepartments } from '../api/configApi'
 import { toast } from 'vue3-toastify'
@@ -230,6 +230,43 @@ async function addToRightPanel(expense) {
     emit('count-changed')
   } catch {
     toast.error('加入失敗，請稍後再試')
+  }
+}
+
+// ── 情境類型 inline 下拉（右欄補件卡片）
+const relationTypeDropdownId = ref(null)
+const updatingRelTypeId = ref(null)
+const dropdownPos = ref({ top: 0, left: 0 })
+const dropdownExpense = ref(null)
+
+function openRelTypeDropdown(event, sup) {
+  if (relationTypeDropdownId.value === sup.id) {
+    relationTypeDropdownId.value = null
+    dropdownExpense.value = null
+    return
+  }
+  const rect = event.currentTarget.getBoundingClientRect()
+  dropdownPos.value = { top: rect.bottom + 2, left: rect.left }
+  dropdownExpense.value = sup
+  relationTypeDropdownId.value = sup.id
+}
+
+async function changeRelationType(sup, newType) {
+  relationTypeDropdownId.value = null
+  if (newType === sup.relation_type) return
+  updatingRelTypeId.value = sup.id
+  try {
+    const baseUpdate = { relation_type: newType, dismissed_from_waiting_return: false }
+    if (['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE'].includes(newType)) {
+      baseUpdate.voucher_categories = JSON.stringify(['RETURN'])
+    }
+    await updateExpense(sup.id, baseUpdate)
+    toast.success('補件類型已更新')
+    await loadData()
+  } catch {
+    toast.error('更新失敗，請稍後再試')
+  } finally {
+    updatingRelTypeId.value = null
   }
 }
 
@@ -952,7 +989,22 @@ async function unlinkSupplement(supplement, invoice) {
               <div class="flex items-center gap-1.5 mb-1.5">
                 <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="getStatusConfig(sup.status).dot" />
                 <span class="font-mono text-[11px] font-semibold text-gray-700 truncate">{{ sup.serial_number }}</span>
-                <span v-if="relationTypeLabel(sup.relation_type)"
+                <button
+                  v-if="EDITABLE_RELATION_TYPES.includes(sup.relation_type)"
+                  @click.stop="openRelTypeDropdown($event, sup)"
+                  :disabled="updatingRelTypeId === sup.id"
+                  class="text-[9px] px-1 py-0.5 rounded shrink-0 font-medium border cursor-pointer hover:opacity-75 transition-opacity disabled:opacity-50 flex items-center gap-0.5"
+                  :class="getRelationTypeConfig(sup.relation_type)?.badgeClass"
+                  title="點擊可修改補件類型"
+                >
+                  <Loader2 v-if="updatingRelTypeId === sup.id" :size="9" class="animate-spin" />
+                  <template v-else>
+                    {{ getRelationTypeConfig(sup.relation_type)?.label }}
+                    <span class="opacity-50 text-[8px]">▾</span>
+                  </template>
+                </button>
+                <span
+                  v-else-if="relationTypeLabel(sup.relation_type)"
                   class="text-[9px] px-1 py-0.5 rounded shrink-0 font-medium border"
                   :class="getRelationTypeConfig(sup.relation_type)?.badgeClass"
                 >{{ relationTypeLabel(sup.relation_type) }}</span>
@@ -1050,6 +1102,35 @@ async function unlinkSupplement(supplement, invoice) {
       </div>
     </div>
   </div>
+
+  <!-- 補件類型下拉（fixed 定位，z 層級高於 modal 及確認對話框） -->
+  <Teleport to="body">
+    <div
+      v-if="relationTypeDropdownId && dropdownExpense"
+      class="fixed inset-0 z-[65]"
+      @click="relationTypeDropdownId = null; dropdownExpense = null"
+    />
+    <div
+      v-if="relationTypeDropdownId && dropdownExpense"
+      class="fixed z-[66] bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden"
+      :style="{ top: dropdownPos.top + 'px', left: dropdownPos.left + 'px', minWidth: '92px' }"
+      @click.stop
+    >
+      <button
+        v-for="opt in RELATION_TYPE_OPTIONS"
+        :key="opt.value"
+        @click="changeRelationType(dropdownExpense, opt.value)"
+        class="w-full text-left text-[11px] px-2.5 py-1.5 transition-colors flex items-center gap-1.5"
+        :class="[opt.optionClass, (dropdownExpense.relation_type === opt.value || (dropdownExpense.relation_type === 'SUPPLEMENT' && opt.value === 'RETURN_SUPPLEMENT')) ? 'font-semibold' : 'text-gray-600']"
+      >
+        <span
+          class="w-1.5 h-1.5 rounded-full inline-block shrink-0"
+          :class="(dropdownExpense.relation_type === opt.value || (dropdownExpense.relation_type === 'SUPPLEMENT' && opt.value === 'RETURN_SUPPLEMENT')) ? 'bg-current' : 'border border-gray-300'"
+        />
+        {{ opt.label }}
+      </button>
+    </div>
+  </Teleport>
 
   <!-- 燈箱 -->
   <Teleport to="body">

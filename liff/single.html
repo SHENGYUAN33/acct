@@ -281,24 +281,35 @@
       <textarea class="note-textarea" id="note-input" rows="3" placeholder="輸入備注"></textarea>
     </div>
 
-    <!-- 退換貨處理（enable_waiting_return_liff_button=true 時顯示） -->
-    <div id="waiting-return-section" style="display:none; margin-top:16px; background:#faf5ff; border:1px solid #d8b4fe; border-radius:12px; padding:16px;">
-      <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:14px; font-weight:600; color:#7e22ce;">
-        <input type="checkbox" id="is-return-supplement" style="width:18px; height:18px; accent-color:#7c3aed;" />
-        退換貨處理
-      </label>
-      <div id="waiting-return-input-wrap" style="display:none; margin-top:12px;">
-        <label style="font-size:13px; color:#6b7280; display:block; margin-bottom:6px;">舊憑證號碼（選填）</label>
-        <input
-          type="text"
-          id="wr-original-invoice"
-          placeholder="例：AB-12345678"
-          oninput="this.value = this.value.toUpperCase()"
-          style="width:100%; box-sizing:border-box; border:1px solid #c4b5fd; border-radius:8px; padding:10px 12px; font-size:14px; font-family:monospace; outline:none;"
-        />
-        <p style="font-size:12px; color:#9ca3af; margin-top:8px; line-height:1.6;">
-          若有折讓單請一起上傳。<br>其他說明可填入上方備注欄。
-        </p>
+    <!-- 待退貨 & 退換貨處理區塊（enable_waiting_return_liff_button=true 時顯示，兩者互斥） -->
+    <div id="waiting-return-section" style="display:none; margin-top:16px;">
+      <!-- 待退貨按鈕：標記此費用為待退貨原始憑證 -->
+      <div style="background:#faf5ff; border:1px solid #d8b4fe; border-radius:12px; padding:16px; margin-bottom:10px;">
+        <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:14px; font-weight:600; color:#7e22ce;">
+          <input type="checkbox" id="is-waiting-return-original" style="width:18px; height:18px; accent-color:#7c3aed;" />
+          待退貨
+        </label>
+        <p style="font-size:12px; color:#9ca3af; margin-top:6px; margin-left:28px;">標記後此費用將進入待退貨管理，等待日後補傳退貨物品照</p>
+      </div>
+      <!-- 退換貨處理：此上傳為退貨補件（物品照） -->
+      <div style="background:#faf5ff; border:1px solid #d8b4fe; border-radius:12px; padding:16px;">
+        <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:14px; font-weight:600; color:#7e22ce;">
+          <input type="checkbox" id="is-return-supplement" style="width:18px; height:18px; accent-color:#7c3aed;" />
+          退換貨處理
+        </label>
+        <div id="waiting-return-input-wrap" style="display:none; margin-top:12px;">
+          <label style="font-size:13px; color:#6b7280; display:block; margin-bottom:6px;">舊憑證號碼（選填）</label>
+          <input
+            type="text"
+            id="wr-original-invoice"
+            placeholder="例：AB-12345678"
+            oninput="this.value = this.value.toUpperCase()"
+            style="width:100%; box-sizing:border-box; border:1px solid #c4b5fd; border-radius:8px; padding:10px 12px; font-size:14px; font-family:monospace; outline:none;"
+          />
+          <p style="font-size:12px; color:#9ca3af; margin-top:8px; line-height:1.6;">
+            若有折讓單請一起上傳。<br>其他說明可填入上方備注欄。
+          </p>
+        </div>
       </div>
     </div>
 
@@ -636,13 +647,15 @@ async function startUpload() {
   bar.style.width = '90%'
   msgEl.textContent = '送出中...'
 
-  const noteText           = document.getElementById('note-input').value.trim()
-  const isReturnSupplement = document.getElementById('is-return-supplement')?.checked ?? false
-  const wrOriginalInvoice  = (document.getElementById('wr-original-invoice')?.value ?? '').trim().toUpperCase() || null
+  const noteText                = document.getElementById('note-input').value.trim()
+  const isWaitingReturnOriginal = document.getElementById('is-waiting-return-original')?.checked ?? false
+  const isReturnSupplement      = document.getElementById('is-return-supplement')?.checked ?? false
+  const wrOriginalInvoice       = (document.getElementById('wr-original-invoice')?.value ?? '').trim().toUpperCase() || null
 
   try {
     await apiPost(`/liff/sessions/${sessionId}/submit`, {
       group_descriptions: [{ group_index: 0, description: noteText }],
+      ...(isWaitingReturnOriginal ? { is_waiting_return: true } : {}),
       ...(isReturnSupplement ? {
         is_return_supplement: true,
         ...(wrOriginalInvoice ? { wr_original_invoice: wrOriginalInvoice } : {}),
@@ -692,6 +705,8 @@ async function resetAll() {
   renderPhotoGrid()
   btnUpload.disabled = true
 
+  const wrOriginal = document.getElementById('is-waiting-return-original')
+  if (wrOriginal) wrOriginal.checked = false
   const wrCheckbox = document.getElementById('is-return-supplement')
   if (wrCheckbox) wrCheckbox.checked = false
   const wrInvoice = document.getElementById('wr-original-invoice')
@@ -720,15 +735,27 @@ let _wrListenerAdded = false
 
 function initWaitingReturnSection() {
   if (ENABLE_WAITING_RETURN_LIFF_BUTTON !== true && ENABLE_WAITING_RETURN_LIFF_BUTTON !== 'true') return
-  const section   = document.getElementById('waiting-return-section')
-  const checkbox  = document.getElementById('is-return-supplement')
-  const inputWrap = document.getElementById('waiting-return-input-wrap')
+  const section          = document.getElementById('waiting-return-section')
+  const originalCheckbox = document.getElementById('is-waiting-return-original')
+  const supplementCheck  = document.getElementById('is-return-supplement')
+  const inputWrap        = document.getElementById('waiting-return-input-wrap')
 
   if (section) section.style.display = 'block'
 
-  if (!_wrListenerAdded && checkbox && inputWrap) {
-    checkbox.addEventListener('change', () => {
-      inputWrap.style.display = checkbox.checked ? 'block' : 'none'
+  if (!_wrListenerAdded && originalCheckbox && supplementCheck && inputWrap) {
+    // 待退貨勾選 → 取消退換貨處理
+    originalCheckbox.addEventListener('change', () => {
+      if (originalCheckbox.checked) {
+        supplementCheck.checked = false
+        inputWrap.style.display = 'none'
+      }
+    })
+    // 退換貨處理勾選 → 取消待退貨
+    supplementCheck.addEventListener('change', () => {
+      if (supplementCheck.checked) {
+        originalCheckbox.checked = false
+      }
+      inputWrap.style.display = supplementCheck.checked ? 'block' : 'none'
     })
     _wrListenerAdded = true
   }
