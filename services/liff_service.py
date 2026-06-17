@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from core.config import settings
 from core.database import SessionLocal
+from models.expense import ExpenseStatus
 from models.liff_session import SessionImage, UploadSession
 from models.staff_roster import StaffRoster
 from models.user import User
