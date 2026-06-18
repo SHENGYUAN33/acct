@@ -758,6 +758,10 @@ def create_batch_expense(
             if cat_key and cat_key not in seen_expense_cats:
                 seen_expense_cats.append(cat_key)
 
+    # 備註含「押金」→ 強制覆蓋憑證類別為 DEPOSIT
+    if user_description and "押金" in user_description:
+        seen_categories = ["DEPOSIT"]
+
     voucher_categories_json: str | None = (
         json.dumps(seen_categories, ensure_ascii=False) if seen_categories else None
     )
