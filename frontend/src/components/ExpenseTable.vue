@@ -467,7 +467,7 @@ async function handleUnlinkSupplement(parentExpense, sup) {
                       @click="handleDuplicateDismiss(expense)"
                       class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-300 transition-colors"
                       title="確認合法，清除重複警示"
-                    >合法</button>
+                    >保留</button>
                     <button
                       @click="handleDuplicateDelete(expense)"
                       class="text-[10px] px-1.5 py-0.5 rounded bg-red-50 hover:bg-red-100 text-red-600 border border-red-300 transition-colors"

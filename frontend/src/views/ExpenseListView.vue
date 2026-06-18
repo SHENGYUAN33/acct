@@ -84,20 +84,6 @@ async function handleExport() {
         >{{ waitingReturnCount }}</span>
       </button>
 
-      <button
-        v-if="showDuplicateDetection"
-        @click="store.toggleDuplicateFilter()"
-        :class="[
-          'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors',
-          store.hasDuplicateFilter
-            ? 'bg-red-500 text-white border border-red-500'
-            : 'border border-red-300 hover:bg-red-50 text-red-600'
-        ]"
-        title="篩選疑似重複憑證"
-      >
-        <TriangleAlert :size="14" />
-        疑似重複
-      </button>
     </div>
 
     <!-- 載入中提示 -->
