@@ -53,14 +53,6 @@ async function handleExport() {
     <!-- 操作按鈕列 -->
     <div class="px-4 pb-3 flex items-center gap-2">
       <button
-        @click="store.openCreateModal()"
-        class="flex items-center gap-1.5 px-3 py-1.5 border border-gray-400 rounded-full text-sm text-gray-600 hover:bg-gray-100 transition-colors"
-      >
-        <Plus :size="14" />
-        新增一筆費用
-      </button>
-
-      <button
         @click="handleExport"
         :disabled="isExporting"
         class="flex items-center gap-1.5 px-4 py-1.5 bg-blue-500 hover:bg-blue-600 disabled:opacity-60 text-white rounded-full text-sm font-medium transition-colors"
