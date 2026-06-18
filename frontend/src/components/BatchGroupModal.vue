@@ -15,6 +15,14 @@ const emit = defineEmits(['close'])
 const isLoading = ref(true)
 const batchExpenses = ref([])
 
+const lightboxOpen = ref(false)
+const lightboxSrc = ref('')
+
+function openLightbox(src) {
+  lightboxSrc.value = src
+  lightboxOpen.value = true
+}
+
 const expense = computed(() => batchExpenses.value[0] ?? null)
 
 
@@ -113,8 +121,9 @@ onMounted(loadBatch)
                   v-if="isViewableImage(img.image_url)"
                   :src="imgUrl(img.image_url)"
                   :alt="img.voucher_category || '圖片'"
-                  class="w-full h-full object-cover"
+                  class="w-full h-full object-cover cursor-zoom-in hover:opacity-90 transition-opacity"
                   draggable="false"
+                  @click="openLightbox(imgUrl(img.image_url))"
                 />
                 <a
                   v-else
@@ -172,5 +181,19 @@ onMounted(loadBatch)
       </div>
 
     </div>
+  </div>
+
+  <!-- Lightbox -->
+  <div
+    v-if="lightboxOpen"
+    class="fixed inset-0 z-[70] bg-black/90 flex items-center justify-center p-4 cursor-zoom-out"
+    @click="lightboxOpen = false"
+  >
+    <img
+      :src="lightboxSrc"
+      alt="圖片預覽"
+      class="max-w-full max-h-full rounded-lg shadow-2xl object-contain"
+      @click.stop
+    />
   </div>
 </template>
