@@ -120,6 +120,8 @@ def _get_base_url(request: Request) -> str:
     return f"{proto}://{host}"
 
 
+@app.get("/liff", include_in_schema=False)
+@app.get("/liff/", include_in_schema=False)
 @app.get("/liff-app", include_in_schema=False)
 @app.get("/liff-app/", include_in_schema=False)
 async def serve_liff_root(request: Request) -> Response:
