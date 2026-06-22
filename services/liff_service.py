@@ -71,8 +71,8 @@ def create_session(
     # 查詢 user_id（FK）
     user = db.scalar(select(User).where(User.line_user_id == line_user_id))
 
-    # 名冊綁定檢查：real_name 為 null 表示尚未完成綁定
-    if not user or not user.real_name:
+    # 名冊綁定檢查：僅在 enable_roster_binding=True 時強制要求 real_name
+    if settings.enable_roster_binding and (not user or not user.real_name):
         line_service.set_user_state(db, line_user_id, "BINDING_REAL_NAME")
         if _LINE_UID_RE.match(line_user_id):
             line_service.push_text(
