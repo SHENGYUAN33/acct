@@ -23,6 +23,7 @@ from core.constants import (
     TAX_REPORT_HEADERS,
     VOUCHER_CATEGORY_ZH,
 )
+from core.relation_rules import REVERSAL_TYPES, SUPPLEMENT_TYPES, csv_remark as _csv_remark
 from core.database import get_db
 from core.response import ok
 from routers.auth import get_current_user
@@ -151,13 +152,7 @@ def export_expenses(
         return str(val) if val is not None else ""
 
     for e in ordered:
-        # 備注欄邏輯：沖銷分錄 / 換單作廢 / 退件原因
-        if e.relation_type in ("VOID_REVERSAL", "RETURN_REVERSAL"):
-            remark = "沖銷分錄"
-        elif e.status == ExpenseStatus.REPLACED_VOID:
-            remark = e.void_reason or e.reject_reason or "換單作廢"
-        else:
-            remark = e.reject_reason or ""
+        remark = _csv_remark(e.relation_type, e.status, e.reject_reason, getattr(e, "void_reason", None))
 
         expense_cats: list[str] = json.loads(e.expense_categories or "[]")
         writer.writerow([
@@ -263,7 +258,7 @@ def export_tax_report(
         v_sub = subtypes[0] if subtypes else ""
         tax_type = _classify_tax_type(v_cat, v_sub)
 
-        remark = "沖銷分錄" if e.relation_type in ("VOID_REVERSAL", "RETURN_REVERSAL") else ""
+        remark = "沖銷分錄" if e.relation_type in REVERSAL_TYPES else ""
 
         writer.writerow([
             e.serial_number,
@@ -327,10 +322,10 @@ def list_waiting_returns(
         ).order_by(Expense.created_at.desc())
     ).all())
 
-    # Step 2：取所有尚未配對的退貨補件（三種情境，parent_id IS NULL，未移出待退貨管理）
+    # Step 2：取所有尚未配對的退貨補件（parent_id IS NULL，未移出待退貨管理）
     supplements: list[Expense] = list(db.scalars(
         select(Expense).where(
-            Expense.relation_type.in_(["VOID_REPLACE", "CREDIT_NOTE", "RETURN_SUPPLEMENT", "AMOUNT_CORRECTION"]),
+            Expense.relation_type.in_(SUPPLEMENT_TYPES),
             Expense.parent_id.is_(None),
             Expense.is_active == True,
             Expense.dismissed_from_waiting_return == False,
@@ -341,7 +336,7 @@ def list_waiting_returns(
     # 原始憑證仍為 WAITING_RETURN 時顯示於左側；已離開 WAITING_RETURN 則在 Step 5b 過濾掉。
     all_paired_supplements: list[Expense] = list(db.scalars(
         select(Expense).where(
-            Expense.relation_type.in_(["VOID_REPLACE", "CREDIT_NOTE", "RETURN_SUPPLEMENT", "AMOUNT_CORRECTION"]),
+            Expense.relation_type.in_(SUPPLEMENT_TYPES),
             Expense.parent_id.isnot(None),
             Expense.is_active == True,
         ).order_by(Expense.created_at.desc())

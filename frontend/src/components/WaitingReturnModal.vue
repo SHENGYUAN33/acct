@@ -219,7 +219,7 @@ async function searchForRightAdd() {
 async function addToRightPanel(expense) {
   const relationType = autoDetectRelationType(expense)
   const payload = { relation_type: relationType, dismissed_from_waiting_return: false }
-  if (['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE', 'AMOUNT_CORRECTION'].includes(relationType)) payload.voucher_categories = JSON.stringify(['RETURN'])
+  if (SUPPLEMENT_RELATION_TYPES.includes(relationType)) payload.voucher_categories = JSON.stringify(['RETURN'])
   try {
     await updateExpense(expense.id, payload)
     rightAddQuery.value = ''
@@ -257,7 +257,7 @@ async function changeRelationType(sup, newType) {
   updatingRelTypeId.value = sup.id
   try {
     const baseUpdate = { relation_type: newType, dismissed_from_waiting_return: false }
-    if (['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE', 'AMOUNT_CORRECTION'].includes(newType)) {
+    if (SUPPLEMENT_RELATION_TYPES.includes(newType)) {
       baseUpdate.voucher_categories = JSON.stringify(['RETURN'])
     }
     await updateExpense(sup.id, baseUpdate)

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from core.config import settings
 from core.expense_categories import normalize_to_key
+from core.relation_rules import CSV_FORCE_INCLUDE_TYPES, REVERSAL_REQUIRED_TYPES, REVERSAL_TYPES
 from models.expense import Expense, ExpenseStatus
 from models.expense_image import ExpenseImage
 from models.user import User
@@ -379,7 +380,7 @@ def get_expenses_for_export(
             or_(
                 Expense.status == status,
                 Expense.status == ExpenseStatus.REPLACED_VOID,
-                Expense.relation_type.in_(["VOID_REVERSAL", "RETURN_REVERSAL", "CREDIT_NOTE", "VOID_ORIGINAL", "AMOUNT_CORRECTION"]),
+                Expense.relation_type.in_(CSV_FORCE_INCLUDE_TYPES),
             )
         )
     # 所有記錄統一以 upload_date 篩選（沖銷分錄建立時 upload_date=now()，天然落在正確期間）
@@ -993,7 +994,7 @@ def pair_expenses(
     )
     # 折讓單（CREDIT_NOTE）本身即為負數記錄，不需要沖銷分錄。
     # 換貨收據（RETURN_SUPPLEMENT / AMOUNT_CORRECTION）才需要自動建立 RETURN_REVERSAL。
-    if supplement.relation_type in ("RETURN_SUPPLEMENT", "AMOUNT_CORRECTION"):
+    if supplement.relation_type in REVERSAL_REQUIRED_TYPES:
         existing_reversal = db.scalar(
             select(Expense).where(
                 Expense.parent_id == original.id,

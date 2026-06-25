@@ -46,11 +46,11 @@ function toggleExpand(currentExpandedId, invoiceId) {
   return currentExpandedId === invoiceId ? null : invoiceId
 }
 
+import { SUPPLEMENT_RELATION_TYPES } from '../constants/relationType.js'
+
 /** 對應 WaitingReturnModal.vue 的 searchSupplements 過濾邏輯 */
 function filterSupplementsByRelationType(items) {
-  return items.filter(e =>
-    ['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE', 'AMOUNT_CORRECTION'].includes(e.relation_type)
-  )
+  return items.filter(e => SUPPLEMENT_RELATION_TYPES.includes(e.relation_type))
 }
 
 /** 對應 leftActiveCount computed */

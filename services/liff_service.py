@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from core.config import settings
 from core.database import SessionLocal
+from core.relation_rules import REVERSAL_REQUIRED_TYPES
 from models.expense import ExpenseStatus
 from models.liff_session import SessionImage, UploadSession
 from models.staff_roster import StaffRoster
@@ -562,7 +563,7 @@ async def process_session_background(
                     # 只有換貨收據（RETURN_SUPPLEMENT / AMOUNT_CORRECTION）才需要沖銷分錄；
                     # 折讓單（CREDIT_NOTE）與換新發票（VOID_REPLACE）本身即為負數記錄，不需要。
                     ref_inv_no = expense.referenced_invoice_number
-                    if ref_inv_no and expense.relation_type in ("RETURN_SUPPLEMENT", "AMOUNT_CORRECTION"):
+                    if ref_inv_no and expense.relation_type in REVERSAL_REQUIRED_TYPES:
                         from sqlalchemy import select as _sa_select
                         from models.expense import Expense as _Expense, ExpenseStatus as _ES
                         original_wr = db.scalar(
