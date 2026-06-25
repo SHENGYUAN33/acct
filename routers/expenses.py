@@ -133,7 +133,7 @@ def export_expenses(
     writer = csv.writer(buf)
     writer.writerow(CSV_HEADERS)
 
-    # 重新排序：有 parent_id 的補件/折讓單緊接在原單後面
+    # 重新排序：有 parent_id 的補件緊接在原單後面
     id_set = {e.id for e in items}
     children_map: dict = {}
     roots: list = []
@@ -147,20 +147,17 @@ def export_expenses(
         ordered.append(e)
         ordered.extend(children_map.get(e.id, []))
 
+    def _fmt(val: Decimal | None) -> str:
+        return str(val) if val is not None else ""
+
     for e in ordered:
-        # REPLACED_VOID（舊資料）、VOID_ORIGINAL（換單原始單）均顯示負數
-        # CREDIT_NOTE 的 total_amount OCR 已強制為負數，不再乘以 -1
-        is_void = (
-            e.status == ExpenseStatus.REPLACED_VOID
-            or e.relation_type == "VOID_ORIGINAL"
-        )
-        sign = Decimal("-1") if is_void else Decimal("1")
-
-        def _fmt_amount(val: Decimal | None, _sign: Decimal = sign) -> str:
-            return str(val * _sign) if val is not None else ""
-
-        # REPLACED_VOID 時退件原因欄改填 void_reason（沖銷原因）
-        remark = (e.void_reason or e.reject_reason or "") if is_void else (e.reject_reason or "")
+        # 備注欄邏輯：沖銷分錄 / 換單作廢 / 退件原因
+        if e.relation_type in ("VOID_REVERSAL", "RETURN_REVERSAL"):
+            remark = "沖銷分錄"
+        elif e.status == ExpenseStatus.REPLACED_VOID:
+            remark = e.void_reason or e.reject_reason or "換單作廢"
+        else:
+            remark = e.reject_reason or ""
 
         expense_cats: list[str] = json.loads(e.expense_categories or "[]")
         writer.writerow([
@@ -178,14 +175,15 @@ def export_expenses(
                 for c in json.loads(e.voucher_categories or "[]")
             ),
             " / ".join(EXPENSE_CATEGORY_ZH.get(c, c) for c in expense_cats),
-            _fmt_amount(e.total_amount),
-            _fmt_amount(e.net_amount),
-            _fmt_amount(e.tax_amount),
+            _fmt(e.total_amount),
+            _fmt(e.net_amount),
+            _fmt(e.tax_amount),
             f"\t{e.seller_tax_id}" if e.seller_tax_id else "",
             e.seller_name or "",
             e.item_description or "",
             STATUS_ZH.get(e.status.value, e.status.value),
             remark,
+            e.return_record or "",
             e.created_at.strftime("%Y-%m-%d %H:%M"),
             e.updated_at.strftime("%Y-%m-%d %H:%M"),
         ])
@@ -193,13 +191,9 @@ def export_expenses(
     # ── 費用科目加總 ──────────────────────────────────────────
     category_totals: dict[str, Decimal] = {}
     for e in ordered:
-        if e.total_amount is None:
+        amt = e.total_amount
+        if amt is None:
             continue
-        is_void_sum = (
-            e.status == ExpenseStatus.REPLACED_VOID
-            or e.relation_type == "VOID_ORIGINAL"
-        )
-        amt = e.total_amount * (Decimal("-1") if is_void_sum else Decimal("1"))
         cats: list[str] = json.loads(e.expense_categories or "[]")
         primary = cats[0] if cats else "OTHER"
         category_totals[primary] = category_totals.get(primary, Decimal("0")) + amt
@@ -256,13 +250,11 @@ def export_tax_report(
     writer = csv.writer(buf)
     writer.writerow(TAX_REPORT_HEADERS)
 
+    # 所有記錄直接輸出 DB 原始金額，無 sign flip
+    def _tax_fmt(val: Decimal | None) -> str:
+        return str(val) if val is not None else ""
+
     for e in items:
-        is_void = e.status == ES.REPLACED_VOID or e.relation_type == "VOID_ORIGINAL"
-        sign = Decimal("-1") if is_void else Decimal("1")
-
-        def _tax_fmt(val: Decimal | None, _s: Decimal = sign) -> str:
-            return str(val * _s) if val is not None else ""
-
         subtypes: list[str] = json.loads(e.voucher_subtypes or "[]")
         categories: list[str] = json.loads(e.voucher_categories or "[]")
         exp_cats: list[str] = json.loads(e.expense_categories or "[]")
@@ -271,7 +263,7 @@ def export_tax_report(
         v_sub = subtypes[0] if subtypes else ""
         tax_type = _classify_tax_type(v_cat, v_sub)
 
-        remark = "已沖銷" if is_void else ""
+        remark = "沖銷分錄" if e.relation_type in ("VOID_REVERSAL", "RETURN_REVERSAL") else ""
 
         writer.writerow([
             e.serial_number,
@@ -320,7 +312,7 @@ def list_waiting_returns(
     """
     回傳所有待退貨相關案件：
     - cases：WAITING_RETURN 原始憑證 + 已自動配對的補件
-    - orphan_supplements：尚未配對的退貨補件（三種情境：VOID_REPLACE/CREDIT_NOTE/RETURN_SUPPLEMENT）
+    - orphan_supplements：尚未配對的退貨補件（四種情境：VOID_REPLACE/CREDIT_NOTE/RETURN_SUPPLEMENT/AMOUNT_CORRECTION）
     - total：WAITING_RETURN 案件數（用於 badge）
 
     左側（cases）自動納入被補件以 referenced_invoice_number 引用的原始憑證，
@@ -338,7 +330,7 @@ def list_waiting_returns(
     # Step 2：取所有尚未配對的退貨補件（三種情境，parent_id IS NULL，未移出待退貨管理）
     supplements: list[Expense] = list(db.scalars(
         select(Expense).where(
-            Expense.relation_type.in_(["VOID_REPLACE", "CREDIT_NOTE", "RETURN_SUPPLEMENT"]),
+            Expense.relation_type.in_(["VOID_REPLACE", "CREDIT_NOTE", "RETURN_SUPPLEMENT", "AMOUNT_CORRECTION"]),
             Expense.parent_id.is_(None),
             Expense.is_active == True,
             Expense.dismissed_from_waiting_return == False,
@@ -349,7 +341,7 @@ def list_waiting_returns(
     # 原始憑證仍為 WAITING_RETURN 時顯示於左側；已離開 WAITING_RETURN 則在 Step 5b 過濾掉。
     all_paired_supplements: list[Expense] = list(db.scalars(
         select(Expense).where(
-            Expense.relation_type.in_(["VOID_REPLACE", "CREDIT_NOTE", "RETURN_SUPPLEMENT"]),
+            Expense.relation_type.in_(["VOID_REPLACE", "CREDIT_NOTE", "RETURN_SUPPLEMENT", "AMOUNT_CORRECTION"]),
             Expense.parent_id.isnot(None),
             Expense.is_active == True,
         ).order_by(Expense.created_at.desc())

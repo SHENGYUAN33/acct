@@ -114,10 +114,8 @@ export const useExpenseStore = defineStore('expense', () => {
     })
   })
 
-  const paginatedExpenses = computed(() => {
-    const start = (currentPage.value - 1) * pageSize.value
-    return filteredExpenses.value.slice(start, start + pageSize.value)
-  })
+  // 後端已做分頁，本地 filteredExpenses 就是當前頁資料，不再二次 slice
+  const paginatedExpenses = computed(() => filteredExpenses.value)
 
   // 當前頁是否全勾選（需在 paginatedExpenses 後定義）
   const allChecked = computed(() => {
@@ -125,8 +123,9 @@ export const useExpenseStore = defineStore('expense', () => {
       paginatedExpenses.value.every((e) => checkedIds.value.has(e.id))
   })
 
+  // 依後端回傳的總筆數計算總頁數（非本地 filteredExpenses 長度）
   const totalPages = computed(() =>
-    Math.max(1, Math.ceil(filteredExpenses.value.length / pageSize.value))
+    Math.max(1, Math.ceil(totalCount.value / pageSize.value))
   )
 
   // 統計卡片資料（從目前 expenses 計算）
@@ -187,15 +186,17 @@ export const useExpenseStore = defineStore('expense', () => {
     }
   }
 
-  function setPage(page) {
+  async function setPage(page) {
     if (page >= 1 && page <= totalPages.value) {
       currentPage.value = page
+      await fetchExpenses()
     }
   }
 
-  function setPageSize(size) {
+  async function setPageSize(size) {
     pageSize.value = size
     currentPage.value = 1
+    await fetchExpenses()
   }
 
   function openAudit(expense) {
@@ -263,6 +264,7 @@ export const useExpenseStore = defineStore('expense', () => {
     const payload = {
       submitter_name: formData.submitter_name || null,
       submitter_dept: formData.submitter_dept || null,
+      upload_date: formData.upload_date || null,
       expense_date: formData.expense_date || null,
       invoice_number: formData.invoice_number || null,
       total_amount: formData.total_amount !== '' ? formData.total_amount : null,
@@ -324,7 +326,7 @@ export const useExpenseStore = defineStore('expense', () => {
   }
 
   /**
-   * 刪除費用
+   * 刪除費用（含重新載入清單）
    * @param {string} id - Expense UUID
    */
   async function deleteExpense(id) {
@@ -333,14 +335,32 @@ export const useExpenseStore = defineStore('expense', () => {
   }
 
   /**
-   * 匯出 CSV：觸發瀏覽器下載 expenses.csv
+   * 僅刪除費用，不重新載入清單（供批次操作使用）
+   * @param {string} id - Expense UUID
    */
-  async function downloadExport() {
-    const res = await apiExportExpenses()
+  async function deleteExpenseById(id) {
+    await apiDeleteExpense(id)
+  }
+
+  /**
+   * 匯出 CSV：觸發瀏覽器下載 expenses.csv
+   * @param {{ date_from?: string, date_to?: string, status?: string }} params
+   */
+  async function downloadExport(params = {}) {
+    const res = await apiExportExpenses(params)
+    // 依日期範圍產生有意義的檔名，例如 expenses_2026-04.csv
+    let filename = 'expenses'
+    if (params.date_from && params.date_to) {
+      const from = params.date_from.slice(0, 7)  // YYYY-MM
+      const to = params.date_to.slice(0, 7)
+      filename = from === to ? `expenses_${from}` : `expenses_${from}_${to}`
+    } else if (params.date_from) {
+      filename = `expenses_from_${params.date_from}`
+    }
     const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv;charset=utf-8' }))
     const a = document.createElement('a')
     a.href = url
-    a.download = 'expenses.csv'
+    a.download = `${filename}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -463,6 +483,7 @@ export const useExpenseStore = defineStore('expense', () => {
     saveExpense,
     createExpense,
     deleteExpense,
+    deleteExpenseById,
     downloadExport,
     uploadImage,
     replaceImage,

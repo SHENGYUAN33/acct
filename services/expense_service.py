@@ -8,7 +8,7 @@ from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import or_, select, func, text, nullslast, nullsfirst
+from sqlalchemy import and_, or_, select, func, text, nullslast, nullsfirst
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -218,7 +218,10 @@ def list_expenses(
     )
 
     if not include_inactive:
-        stmt = stmt.where(Expense.is_active == True)
+        # REPLACED_VOID 雖然 is_active=False，仍需顯示於 Dashboard（已換單的歷史記錄）
+        stmt = stmt.where(
+            or_(Expense.is_active == True, Expense.status == ExpenseStatus.REPLACED_VOID)
+        )
     if status:
         stmt = stmt.where(Expense.status == status)
     if date_from:
@@ -309,16 +312,40 @@ def delete_expense(db: Session, expense_id: uuid.UUID) -> bool:
     expense = get_expense(db, expense_id)
     if not expense:
         return False
-    # Bug 3：若刪除 VOID_REPLACE 補件，先還原被取代的原始憑證狀態
+    # 刪除 VOID_REPLACE 補件 → 還原原始單，並連帶刪除 VOID_REVERSAL 沖銷分錄
     if expense.relation_type == "VOID_REPLACE" and expense.parent_id:
         original = db.get(Expense, expense.parent_id)
         if original:
             original.is_active = True
-            original.status = ExpenseStatus.WAITING_RETURN
+            original.status = ExpenseStatus.PENDING   # 回 PENDING（非 WAITING_RETURN）
+            original.relation_type = None             # 清除 VOID_ORIGINAL 標記
+            original.voided_at = None
             original.void_reason = None
             db.add(original)
-    # 若為有發票號碼的憑證（WAITING_RETURN），連帶刪除所有以此發票號碼為 referenced_invoice_number 的 RETURN_SUPPLEMENT 補件
-    if expense.invoice_number:
+            # 刪除該原始單下所有 VOID_REVERSAL 沖銷分錄
+            void_reversals = list(db.scalars(
+                select(Expense).where(
+                    Expense.parent_id == original.id,
+                    Expense.relation_type == "VOID_REVERSAL",
+                )
+            ).all())
+            for rev in void_reversals:
+                db.delete(rev)
+
+    # 刪除 WAITING_RETURN 原始單 → 連帶刪除其 RETURN_REVERSAL 沖銷分錄
+    if expense.status == ExpenseStatus.WAITING_RETURN:
+        return_reversals = list(db.scalars(
+            select(Expense).where(
+                Expense.parent_id == expense.id,
+                Expense.relation_type == "RETURN_REVERSAL",
+            )
+        ).all())
+        for rev in return_reversals:
+            db.delete(rev)
+
+    # 若為有發票號碼的原始憑證（WAITING_RETURN），連帶刪除所有以此發票號碼為 referenced_invoice_number 的 RETURN_SUPPLEMENT 補件
+    # 注意：沖銷分錄（RETURN_REVERSAL / VOID_REVERSAL）雖然也有 invoice_number，不應觸發此 cascade
+    if expense.invoice_number and expense.relation_type not in ("RETURN_REVERSAL", "VOID_REVERSAL"):
         supplements = list(db.scalars(
             select(Expense).where(
                 Expense.relation_type == "RETURN_SUPPLEMENT",
@@ -347,14 +374,15 @@ def get_expenses_for_export(
     # REJECTED（管理員退回作廢）不具財務意義，不納入 CSV 匯出
     stmt = stmt.where(Expense.status != ExpenseStatus.REJECTED)
     if status:
-        # 舊 REPLACED_VOID 與新 VOID_ORIGINAL 無視 status 篩選，永遠強制納入，確保負數沖銷記錄不缺漏
+        # 沖銷分錄與換單作廢記錄永遠強制納入，確保報表完整
         stmt = stmt.where(
             or_(
                 Expense.status == status,
                 Expense.status == ExpenseStatus.REPLACED_VOID,
-                Expense.relation_type == "VOID_ORIGINAL",
+                Expense.relation_type.in_(["VOID_REVERSAL", "RETURN_REVERSAL", "CREDIT_NOTE", "VOID_ORIGINAL", "AMOUNT_CORRECTION"]),
             )
         )
+    # 所有記錄統一以 upload_date 篩選（沖銷分錄建立時 upload_date=now()，天然落在正確期間）
     if date_from:
         stmt = stmt.where(func.date(Expense.upload_date) >= date_from)
     if date_to:
@@ -385,6 +413,9 @@ def update_expense(
         and not expense.is_active
     ):
         expense.is_active = True
+    # Dashboard 手動將狀態改為 REPLACED_VOID 時寫入 voided_at
+    if new_status == ExpenseStatus.REPLACED_VOID and expense.voided_at is None:
+        expense.voided_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(expense)
     return expense
@@ -881,6 +912,61 @@ def create_batch_expense(
     return expense
 
 
+def create_reversal_expense(
+    db: Session,
+    original: Expense,
+    reversal_type: str,
+) -> Expense:
+    """
+    依原始費用自動建立沖銷分錄（upload_date=now()，金額取負）。
+    reversal_type: "VOID_REVERSAL" | "RETURN_REVERSAL"
+    """
+    def _neg(val: Decimal | None) -> Decimal | None:
+        return -val if val is not None else None
+
+    for _attempt in range(5):
+        serial = _generate_serial_number(db)
+        reversal = Expense(
+            user_id=original.user_id,
+            serial_number=serial,
+            uploader_name=original.uploader_name,
+            uploader_dept=original.uploader_dept,
+            upload_date=datetime.now(timezone.utc),
+            expense_date=original.expense_date,
+            invoice_number=original.invoice_number,
+            total_amount=_neg(original.total_amount),
+            net_amount=_neg(original.net_amount),
+            tax_amount=_neg(original.tax_amount),
+            seller_tax_id=original.seller_tax_id,
+            seller_name=original.seller_name,
+            item_description=original.item_description,
+            voucher_categories=original.voucher_categories,
+            voucher_subtypes=original.voucher_subtypes,
+            expense_categories=original.expense_categories,
+            status=ExpenseStatus.PENDING,
+            relation_type=reversal_type,
+            parent_id=original.id,
+            referenced_invoice_number=original.invoice_number,
+            image_url=list(original.image_url or []),
+            item_image_url=[],
+            image_count=0,
+        )
+        db.add(reversal)
+        try:
+            db.commit()
+            db.refresh(reversal)
+            logger.info(
+                "create_reversal_expense: %s serial=%s ← parent=%s",
+                reversal_type, reversal.serial_number, original.serial_number,
+            )
+            return reversal
+        except IntegrityError as exc:
+            db.rollback()
+            if "uq_expenses_serial_number" not in str(exc.orig):
+                raise
+    raise RuntimeError("無法產生唯一案件流水號，請稍後再試")
+
+
 def pair_expenses(
     db: Session,
     supplement_id: uuid.UUID,
@@ -894,12 +980,28 @@ def pair_expenses(
     supplement.parent_id = original.id
     if original.invoice_number and not supplement.referenced_invoice_number:
         supplement.referenced_invoice_number = original.invoice_number
+    # 退貨紀錄追蹤碼：統一使用原始憑證的發票號碼，無發票號碼則退用案件編號
+    supplement.return_record = original.invoice_number or original.serial_number
+    # 換貨收據配對確認：原始 WAITING_RETURN 記錄沖銷時間
+    if original.status == ExpenseStatus.WAITING_RETURN and original.voided_at is None:
+        original.voided_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(supplement)
     logger.info(
         "pair_expenses: supplement=%s → original=%s",
         supplement.serial_number, original.serial_number,
     )
+    # 折讓單（CREDIT_NOTE）本身即為負數記錄，不需要沖銷分錄。
+    # 換貨收據（RETURN_SUPPLEMENT / AMOUNT_CORRECTION）才需要自動建立 RETURN_REVERSAL。
+    if supplement.relation_type in ("RETURN_SUPPLEMENT", "AMOUNT_CORRECTION"):
+        existing_reversal = db.scalar(
+            select(Expense).where(
+                Expense.parent_id == original.id,
+                Expense.relation_type == "RETURN_REVERSAL",
+            )
+        )
+        if not existing_reversal:
+            create_reversal_expense(db, original, "RETURN_REVERSAL")
     return supplement
 
 

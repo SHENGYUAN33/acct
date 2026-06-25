@@ -28,9 +28,24 @@ export const RELATION_TYPE_CONFIG = {
     optionClass: 'text-teal-600 hover:bg-teal-50',
   },
   VOID_ORIGINAL: {
-    label: '沖銷',
+    label: '被換單',
+    badgeClass: 'bg-gray-100 text-gray-500 border-gray-200',
+    optionClass: '',
+  },
+  VOID_REVERSAL: {
+    label: '沖銷分錄',
     badgeClass: 'bg-red-100 text-red-600 border-red-200',
     optionClass: '',
+  },
+  RETURN_REVERSAL: {
+    label: '沖銷分錄',
+    badgeClass: 'bg-red-100 text-red-600 border-red-200',
+    optionClass: '',
+  },
+  AMOUNT_CORRECTION: {
+    label: '舊收據改金額',
+    badgeClass: 'bg-purple-100 text-purple-600 border-purple-200',
+    optionClass: 'text-purple-600 hover:bg-purple-50',
   },
 }
 
@@ -40,14 +55,15 @@ export function getRelationTypeConfig(type) {
 }
 
 /** 可由使用者在主頁面下拉修改的類型（含舊版 SUPPLEMENT） */
-export const EDITABLE_RELATION_TYPES = ['VOID_REPLACE', 'CREDIT_NOTE', 'RETURN_SUPPLEMENT', 'SUPPLEMENT']
+export const EDITABLE_RELATION_TYPES = ['VOID_REPLACE', 'CREDIT_NOTE', 'RETURN_SUPPLEMENT', 'SUPPLEMENT', 'AMOUNT_CORRECTION']
 
 /** 待退貨管理補件類型（後端查詢用、前端 filter 用） */
-export const SUPPLEMENT_RELATION_TYPES = ['VOID_REPLACE', 'CREDIT_NOTE', 'RETURN_SUPPLEMENT']
+export const SUPPLEMENT_RELATION_TYPES = ['VOID_REPLACE', 'CREDIT_NOTE', 'RETURN_SUPPLEMENT', 'AMOUNT_CORRECTION']
 
-/** 下拉選項（三種正規類型，SUPPLEMENT 已收斂至 RETURN_SUPPLEMENT） */
+/** 下拉選項（四種正規類型，SUPPLEMENT 已收斂至 RETURN_SUPPLEMENT） */
 export const RELATION_TYPE_OPTIONS = [
-  { value: 'RETURN_SUPPLEMENT', ...RELATION_TYPE_CONFIG.RETURN_SUPPLEMENT },
-  { value: 'CREDIT_NOTE',       ...RELATION_TYPE_CONFIG.CREDIT_NOTE },
-  { value: 'VOID_REPLACE',      ...RELATION_TYPE_CONFIG.VOID_REPLACE },
+  { value: 'RETURN_SUPPLEMENT',  ...RELATION_TYPE_CONFIG.RETURN_SUPPLEMENT },
+  { value: 'CREDIT_NOTE',        ...RELATION_TYPE_CONFIG.CREDIT_NOTE },
+  { value: 'VOID_REPLACE',       ...RELATION_TYPE_CONFIG.VOID_REPLACE },
+  { value: 'AMOUNT_CORRECTION',  ...RELATION_TYPE_CONFIG.AMOUNT_CORRECTION },
 ]

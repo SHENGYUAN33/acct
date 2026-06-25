@@ -116,11 +116,18 @@ class Expense(Base):
     void_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 從說明文字或 OCR 提取的參考發票號碼（格式：AB-12345678）
     referenced_invoice_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # 退貨紀錄追蹤碼（換新發票/折讓單：原發票號碼；換貨收據/改金額：原日期+金額，如 "2026-06-01 / $500"）
+    return_record: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Dashboard 手動排序（數值越小越前面；null 表示未設定，排在最後）
     display_order: Mapped[int | None] = mapped_column(nullable=True)
     # 已從待退貨管理移出（保留資料與 relation_type badge，僅隱藏於孤立補件清單）
     dismissed_from_waiting_return: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
+    )
+    # 沖銷/退貨確認時間（REPLACED_VOID / VOID_ORIGINAL / WAITING_RETURN 已配對）
+    # CSV 匯出以此欄位決定沖銷分錄落在哪個報表期間，避免跨期污染
+    voided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     # Relationships

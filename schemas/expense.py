@@ -60,8 +60,10 @@ class ExpenseRead(BaseModel):
     is_active: bool = True
     void_reason: str | None = None
     referenced_invoice_number: str | None = None
+    return_record: str | None = None
     possible_duplicate_of: uuid.UUID | None = None
     dismissed_from_waiting_return: bool = False
+    voided_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -86,6 +88,7 @@ class ExpenseUpdate(BaseModel):
     """Dashboard 審核表單的部分更新欄位（全部可選）。"""
     submitter_name: str | None = None
     submitter_dept: str | None = None
+    upload_date: datetime | None = None
     expense_date: date | None = None
     invoice_number: str | None = None
     total_amount: Decimal | None = None
@@ -103,6 +106,7 @@ class ExpenseUpdate(BaseModel):
     is_active: bool | None = None
     void_reason: str | None = None
     referenced_invoice_number: str | None = None
+    return_record: str | None = None
     dismissed_from_waiting_return: bool | None = None
     voucher_categories: str | None = None
 

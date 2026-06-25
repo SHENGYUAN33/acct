@@ -133,6 +133,10 @@ class SubmitSessionRequest(BaseModel):
         default=None,
         description="情境C：原始收據金額（用於模糊比對）",
     )
+    wr_is_amount_correction: bool = Field(
+        default=False,
+        description="情境D：此次為同一張收據改金額（True → AMOUNT_CORRECTION，False → RETURN_SUPPLEMENT）",
+    )
 
 
 class CreatedExpenseItem(BaseModel):

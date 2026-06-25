@@ -326,6 +326,7 @@ async def process_session_background(
     wr_original_invoice: str | None = None,
     wr_original_date: str | None = None,
     wr_original_amount: float | None = None,
+    wr_is_amount_correction: bool = False,
 ) -> None:
     """
     背景任務：對 session 所有圖片執行 OCR → multi_split_logic_v2 → create_batch_expense。
@@ -511,15 +512,44 @@ async def process_session_background(
                     if credit_note_r:
                         expense.relation_type = "CREDIT_NOTE"
                         expense.referenced_invoice_number = credit_note_r.original_invoice_number
+                        expense.return_record = credit_note_r.original_invoice_number
+                        # 確保折讓單金額為負數（OCR 可能回傳正數）
+                        if expense.total_amount is not None and expense.total_amount > 0:
+                            expense.total_amount = -expense.total_amount
+                        if expense.net_amount is not None and expense.net_amount > 0:
+                            expense.net_amount = -expense.net_amount
+                        if expense.tax_amount is not None and expense.tax_amount > 0:
+                            expense.tax_amount = -expense.tax_amount
                     # 情境A：使用者填了舊發票號碼
                     elif wr_original_invoice:
                         expense.relation_type = "VOID_REPLACE"
                         expense.referenced_invoice_number = wr_original_invoice
-                    # 情境C：填了日期＋金額
+                        expense.return_record = wr_original_invoice
+                    # 情境C/D：填了日期＋金額（換貨收據 或 改金額）
                     elif wr_original_date and wr_original_amount:
-                        expense.relation_type = "RETURN_SUPPLEMENT"
-                        extra = f"換貨收據，原收據日期：{wr_original_date} 金額：{wr_original_amount}"
+                        rtype = "AMOUNT_CORRECTION" if wr_is_amount_correction else "RETURN_SUPPLEMENT"
+                        expense.relation_type = rtype
+                        amt_int = int(wr_original_amount)
+                        extra = f"{'改金額' if wr_is_amount_correction else '換貨收據'}，原收據日期：{wr_original_date} 金額：{wr_original_amount}"
                         expense.item_description = f"{description} | {extra}" if description else extra
+                        # 嘗試以日期＋金額查詢原始收據，取得發票號碼作為退貨紀錄追蹤碼；
+                        # 若原始收據無發票號碼則退用案件編號，均查無才 fallback 日期金額格式。
+                        try:
+                            from datetime import date as _date
+                            from decimal import Decimal as _Dec
+                            from services.relation_service import search_fuzzy_expense as _sfx
+                            _orig = _sfx(
+                                db,
+                                user_id=expense.user_id,
+                                ref_date=_date.fromisoformat(wr_original_date),
+                                ref_amount=_Dec(str(wr_original_amount)),
+                            )
+                            expense.return_record = (
+                                (_orig.invoice_number or _orig.serial_number) if _orig
+                                else f"{wr_original_date} / ${amt_int:,}"
+                            )
+                        except Exception:
+                            expense.return_record = f"{wr_original_date} / ${amt_int:,}"
                     # 未知：僅勾選補件但未填詳細資料，或舊 API waiting_return_ref 橋接
                     else:
                         expense.relation_type = "RETURN_SUPPLEMENT"
@@ -529,6 +559,32 @@ async def process_session_background(
                             expense.item_description = (
                                 f"{description} | {ref_note}" if description else ref_note
                             )
+                    # 只有換貨收據（RETURN_SUPPLEMENT / AMOUNT_CORRECTION）才需要沖銷分錄；
+                    # 折讓單（CREDIT_NOTE）與換新發票（VOID_REPLACE）本身即為負數記錄，不需要。
+                    ref_inv_no = expense.referenced_invoice_number
+                    if ref_inv_no and expense.relation_type in ("RETURN_SUPPLEMENT", "AMOUNT_CORRECTION"):
+                        from sqlalchemy import select as _sa_select
+                        from models.expense import Expense as _Expense, ExpenseStatus as _ES
+                        original_wr = db.scalar(
+                            _sa_select(_Expense).where(
+                                _Expense.invoice_number == ref_inv_no,
+                                _Expense.status == _ES.WAITING_RETURN,
+                                _Expense.is_active == True,
+                            ).order_by(_Expense.created_at.desc())
+                        )
+                        if original_wr and original_wr.voided_at is None:
+                            original_wr.voided_at = datetime.now(timezone.utc)
+                            db.commit()
+                            # 若尚無沖銷分錄，自動建立（pair_expenses 也會建立，idempotent）
+                            existing_rev = db.scalar(
+                                _sa_select(_Expense).where(
+                                    _Expense.parent_id == original_wr.id,
+                                    _Expense.relation_type == "RETURN_REVERSAL",
+                                )
+                            )
+                            if not existing_rev:
+                                from services.expense_service import create_reversal_expense
+                                create_reversal_expense(db, original_wr, "RETURN_REVERSAL")
                     db.commit()
                     logger.info(
                         "process_session_background: %s group=%d serial=%s",

@@ -244,6 +244,7 @@ def submit_session(
         wr_original_invoice=body.wr_original_invoice,
         wr_original_date=body.wr_original_date,
         wr_original_amount=body.wr_original_amount,
+        wr_is_amount_correction=body.wr_is_amount_correction,
     )
 
     return response

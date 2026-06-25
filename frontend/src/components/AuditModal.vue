@@ -485,6 +485,17 @@ function formatDateTime(val) {
   const min = String(d.getMinutes()).padStart(2, '0')
   return `${yyyy}-${mm}-${dd} ${hh}:${min}`
 }
+
+// 上傳日期（Edit Mode 可編輯）：雙向綁定 YYYY-MM-DD ↔ form.upload_date
+const uploadDateValue = computed({
+  get: () => {
+    if (!form.value.upload_date) return ''
+    return String(form.value.upload_date).slice(0, 10)
+  },
+  set: (val) => {
+    form.value.upload_date = val ? `${val}T00:00:00` : null
+  },
+})
 </script>
 
 <template>
@@ -556,23 +567,17 @@ function formatDateTime(val) {
                   </div>
                 </div>
 
-                <!-- 上傳日期 -->
+                <!-- 報帳日期（可編輯，影響 CSV 匯出月份，供管理員補登或測試跨月情境） -->
                 <div class="space-y-1">
-                  <label class="block text-sm text-gray-600">上傳日期：</label>
-                  <template v-if="isCreateMode">
-                    <input
-                      v-model="form.upload_date"
-                      type="text"
-                      placeholder="YYYY-MM-DD"
-                      class="w-full border border-gray-300 rounded px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                    />
-                  </template>
-                  <template v-else>
-                    <div class="flex items-center gap-2 bg-gray-100 border border-gray-200 rounded px-3 py-2 text-sm text-gray-600">
-                      <span class="flex-1">{{ formatDateTime(form.upload_date) }}</span>
-                      <CalendarDays :size="15" class="text-gray-400" />
-                    </div>
-                  </template>
+                  <label class="block text-sm text-gray-600">
+                    報帳日期：
+                    <span class="text-xs text-gray-400 font-normal">（影響 CSV 匯出月份）</span>
+                  </label>
+                  <input
+                    v-model="uploadDateValue"
+                    type="date"
+                    class="w-full border border-gray-300 rounded px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  />
                 </div>
 
                 <!-- 上傳者 -->

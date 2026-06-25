@@ -49,7 +49,7 @@ function toggleExpand(currentExpandedId, invoiceId) {
 /** 對應 WaitingReturnModal.vue 的 searchSupplements 過濾邏輯 */
 function filterSupplementsByRelationType(items) {
   return items.filter(e =>
-    ['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE'].includes(e.relation_type)
+    ['RETURN_SUPPLEMENT', 'VOID_REPLACE', 'CREDIT_NOTE', 'AMOUNT_CORRECTION'].includes(e.relation_type)
   )
 }
 
@@ -166,14 +166,15 @@ describe('搜尋結果 relation_type 過濾', () => {
     { id: '2', relation_type: 'VOID_REPLACE' },
     { id: '3', relation_type: 'CREDIT_NOTE' },
     { id: '4', relation_type: null },
-    { id: '5', relation_type: 'SUPPLEMENT' }, // 舊類型，不應顯示
-    { id: '6', relation_type: 'PENDING' },     // 一般費用，不應顯示
+    { id: '5', relation_type: 'SUPPLEMENT' },        // 舊類型，不應顯示
+    { id: '6', relation_type: 'PENDING' },            // 一般費用，不應顯示
+    { id: '7', relation_type: 'AMOUNT_CORRECTION' },
   ]
 
-  it('TC-FILTER-01: 搜尋結果應只保留三種補件類型（RETURN_SUPPLEMENT / VOID_REPLACE / CREDIT_NOTE）', () => {
+  it('TC-FILTER-01: 搜尋結果應只保留四種補件類型（RETURN_SUPPLEMENT / VOID_REPLACE / CREDIT_NOTE / AMOUNT_CORRECTION）', () => {
     const filtered = filterSupplementsByRelationType(allExpenses)
-    expect(filtered).toHaveLength(3)
-    expect(filtered.map(e => e.id)).toEqual(['1', '2', '3'])
+    expect(filtered).toHaveLength(4)
+    expect(filtered.map(e => e.id)).toEqual(['1', '2', '3', '7'])
   })
 
   it('TC-FILTER-02: 空陣列不 crash，回傳空陣列', () => {

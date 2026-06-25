@@ -164,6 +164,36 @@ function formatAmount(amount) {
   return `$${Number(amount).toLocaleString()}`
 }
 
+// 帶正負號的金額（UI 用）
+function formatAmountSigned(amount) {
+  if (amount === null || amount === undefined) return '-'
+  const n = Number(amount)
+  if (n > 0) return `+$${n.toLocaleString()}`
+  if (n < 0) return `-$${Math.abs(n).toLocaleString()}`
+  return `$0`
+}
+
+function amountColorClass(amount) {
+  if (amount === null || amount === undefined) return 'text-gray-400'
+  const n = Number(amount)
+  if (n > 0) return 'text-green-600 font-medium'
+  if (n < 0) return 'text-red-600 font-medium'
+  return 'text-gray-500'
+}
+
+// 費用影像標籤（依 relation_type 對應說明文字）
+function voucherPhotoLabel(relationType) {
+  const map = {
+    VOID_REVERSAL:    '舊發票照片',
+    VOID_REPLACE:     '新發票照片',
+    CREDIT_NOTE:      '折讓單照片',
+    RETURN_REVERSAL:  '舊收據照片',
+    RETURN_SUPPLEMENT:'新收據照片',
+    AMOUNT_CORRECTION:'修正後收據照片',
+  }
+  return map[relationType] ?? '憑證照片'
+}
+
 function formatDateTime(val) {
   if (!val) return '-'
   const d = new Date(val)
@@ -181,7 +211,9 @@ function formatDateTime(val) {
 const visibleExpenses = computed(() => {
   const resultIds = new Set(store.paginatedExpenses.map(e => e.id))
   return store.paginatedExpenses.filter(e => {
-    if (e.relation_type === 'RETURN_SUPPLEMENT' && e.referenced_invoice_number && !e.dismissed_from_waiting_return) return false
+    if ((e.relation_type === 'RETURN_SUPPLEMENT' || e.relation_type === 'AMOUNT_CORRECTION') && e.referenced_invoice_number && !e.dismissed_from_waiting_return) return false
+    // 沖銷分錄永遠在父憑證子列顯示，不出現在主表格
+    if (e.relation_type === 'VOID_REVERSAL' || e.relation_type === 'RETURN_REVERSAL') return false
     if (e.parent_id && resultIds.has(e.parent_id)) return false
     return true
   }).map(e => addExpenseCategoryDisplay(e))
@@ -254,18 +286,25 @@ async function handleUnlinkSupplement(parentExpense, sup) {
   if (!sup || unlinkingSupplementId.value === sup.id) return
   unlinkingSupplementId.value = sup.id
   try {
-    const ops = [
-      apiUpdateExpense(sup.id, {
-        parent_id: null,
-        referenced_invoice_number: null,
-      }),
-    ]
-    // 解除配對後，父憑證回到待退貨（WAITING_RETURN）並清除沖銷標記
-    ops.push(apiUpdateExpense(parentExpense.id, { status: 'WAITING_RETURN', relation_type: null }))
-    await Promise.all(ops)
+    // 第一步：先清空補件的 referenced_invoice_number，再刪除沖銷分錄
+    // 原因：DELETE 沖銷分錄時後端會依 invoice_number 找 RETURN_SUPPLEMENT 一併刪除；
+    //       若補件的 referenced_invoice_number 尚未清空就先刪沖銷，補件會被誤刪。
+    await Promise.all([
+      apiUpdateExpense(sup.id, { parent_id: null, referenced_invoice_number: null }),
+      apiUpdateExpense(parentExpense.id, { status: 'WAITING_RETURN', relation_type: null }),
+    ])
+
+    // 第二步：確認補件已解除後，再刪除沖銷分錄
+    const currentSubs = supplementCache.value[parentExpense.id] || []
+    const reversalIds = currentSubs
+      .filter(s => s.relation_type === 'RETURN_REVERSAL' || s.relation_type === 'VOID_REVERSAL')
+      .map(s => s.id)
+    await Promise.all(reversalIds.map(rid => store.deleteExpenseById(rid)))
     toast.success(`補件 ${sup.serial_number} 已解除配對，原始憑證改回未審核`)
-    // 從快取陣列中移除已解除的補件
-    const remaining = (supplementCache.value[parentExpense.id] || []).filter(s => s.id !== sup.id)
+    // 從快取陣列中移除已解除的補件與沖銷分錄
+    const remaining = (supplementCache.value[parentExpense.id] || []).filter(
+      s => s.id !== sup.id && !reversalIds.includes(s.id)
+    )
     supplementCache.value = { ...supplementCache.value, [parentExpense.id]: remaining }
     await store.fetchExpenses()
   } catch {
@@ -338,6 +377,8 @@ async function handleUnlinkSupplement(parentExpense, sup) {
             <th class="px-3 py-2.5 text-left text-gray-600 font-medium whitespace-nowrap">費用影像</th>
             <!-- 物品影像 -->
             <th class="px-3 py-2.5 text-left text-gray-600 font-medium whitespace-nowrap">物品影像</th>
+            <!-- 退貨紀錄 -->
+            <th class="px-3 py-2.5 text-left text-gray-600 font-medium whitespace-nowrap">退貨紀錄</th>
             <!-- 項目說明 -->
             <th class="px-3 py-2.5 text-left text-gray-600 font-medium whitespace-nowrap">
               <div class="flex items-center gap-1">
@@ -489,9 +530,9 @@ async function handleUnlinkSupplement(parentExpense, sup) {
                   <!-- 系統管理 badge（不可修改） -->
                   <span
                     v-if="expense.relation_type === 'VOID_ORIGINAL'"
-                    class="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 border border-red-200"
-                    :title="`此憑證已被換單取代，CSV 匯出顯示負數${expense.void_reason ? '（' + expense.void_reason + '）' : ''}`"
-                  >沖銷</span>
+                    class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 border border-gray-200"
+                    :title="`此憑證已被換單取代，沖銷分錄已自動產生${expense.void_reason ? '（' + expense.void_reason + '）' : ''}`"
+                  >被換單</span>
                   <!-- 補件類型 badge（純顯示） -->
                   <template v-else-if="EDITABLE_RELATION_TYPES.includes(expense.relation_type)">
                     <span
@@ -535,17 +576,14 @@ async function handleUnlinkSupplement(parentExpense, sup) {
 
               <!-- 費用影像縮圖（顯示第一張） -->
               <td class="px-3 py-2">
-                <div
-                  v-if="expense.image_url && expense.image_url.length > 0"
-                  class="w-10 h-10 rounded overflow-hidden border border-gray-200 flex items-center justify-center bg-gray-50"
-                >
-                  <img v-if="isViewableImage(expense.image_url[0])" :src="expense.image_url[0]" alt="費用影像" class="w-full h-full object-cover" />
-                  <a v-else :href="expense.image_url[0]" target="_blank" class="text-red-500 text-xs font-bold" title="開啟 PDF">PDF</a>
+                <div v-if="expense.image_url && expense.image_url.length > 0" class="flex flex-col items-start gap-0.5">
+                  <div class="w-10 h-10 rounded overflow-hidden border border-gray-200 flex items-center justify-center bg-gray-50">
+                    <img v-if="isViewableImage(expense.image_url[0])" :src="expense.image_url[0]" alt="費用影像" class="w-full h-full object-cover" />
+                    <a v-else :href="expense.image_url[0]" target="_blank" class="text-red-500 text-xs font-bold" title="開啟 PDF">PDF</a>
+                  </div>
+                  <span v-if="expense.relation_type" class="text-[9px] text-gray-400 leading-tight">{{ voucherPhotoLabel(expense.relation_type) }}</span>
                 </div>
-                <div
-                  v-else
-                  class="w-10 h-10 bg-gray-200 rounded border border-gray-300 flex items-center justify-center"
-                >
+                <div v-else class="w-10 h-10 bg-gray-200 rounded border border-gray-300 flex items-center justify-center">
                   <span class="text-gray-400 text-xs">無</span>
                 </div>
               </td>
@@ -559,12 +597,14 @@ async function handleUnlinkSupplement(parentExpense, sup) {
                   <img v-if="isViewableImage(expense.item_image_url[0])" :src="expense.item_image_url[0]" alt="物品影像" class="w-full h-full object-cover" />
                   <a v-else :href="expense.item_image_url[0]" target="_blank" class="text-red-500 text-xs font-bold" title="開啟 PDF">PDF</a>
                 </div>
-                <div
-                  v-else
-                  class="w-10 h-10 bg-gray-200 rounded border border-gray-300 flex items-center justify-center"
-                >
+                <div v-else class="w-10 h-10 bg-gray-200 rounded border border-gray-300 flex items-center justify-center">
                   <span class="text-gray-400 text-xs">無</span>
                 </div>
+              </td>
+
+              <!-- 退貨紀錄 -->
+              <td class="px-3 py-2 text-gray-600 whitespace-nowrap text-xs">
+                {{ expense.return_record || '-' }}
               </td>
 
               <!-- 項目說明 -->
@@ -572,15 +612,15 @@ async function handleUnlinkSupplement(parentExpense, sup) {
                 <div class="line-clamp-2 text-xs leading-relaxed">
                   {{ expense.user_description || '-' }}
                 </div>
-                <div v-if="expense.total_amount" class="text-xs text-gray-400 mt-0.5">
-                  {{ formatAmount(expense.total_amount) }}
+                <div v-if="expense.total_amount !== null && expense.total_amount !== undefined" class="text-xs mt-0.5" :class="amountColorClass(expense.total_amount)">
+                  {{ formatAmountSigned(expense.total_amount) }}
                 </div>
               </td>
             </tr>
 
             <!-- 展開列（細節區塊） -->
             <tr v-if="expandedRows.has(expense.id)" class="bg-blue-50">
-              <td colspan="14" class="px-6 py-3">
+              <td colspan="16" class="px-6 py-3">
                 <div class="grid grid-cols-4 gap-4 text-xs text-gray-600">
                   <div>
                     <span class="font-medium text-gray-500">案件編號：</span>
@@ -631,7 +671,7 @@ async function handleUnlinkSupplement(parentExpense, sup) {
               v-if="expandedRows.has(expense.id) && expense.parent_id && (expense.relation_type === 'VOID_REPLACE' || expense.relation_type === 'CREDIT_NOTE')"
               class="border-b border-dashed border-gray-300"
             >
-              <td colspan="14" class="bg-gray-100 px-6 py-2.5">
+              <td colspan="16" class="bg-gray-100 px-6 py-2.5">
                 <!-- 載入中 -->
                 <div v-if="fetchingParent.has(expense.id)" class="text-xs text-gray-400 flex items-center gap-1.5">
                   <svg class="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -683,7 +723,7 @@ async function handleUnlinkSupplement(parentExpense, sup) {
               v-if="expandedRows.has(expense.id) && supplementCache[expense.id] === 'loading'"
               class="border-b border-dashed border-purple-200"
             >
-              <td colspan="15" class="bg-purple-50 px-6 py-2.5">
+              <td colspan="16" class="bg-purple-50 px-6 py-2.5">
                 <div class="flex items-center gap-1.5 text-xs text-gray-400">
                   <svg class="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10" class="opacity-25"/>
@@ -707,7 +747,7 @@ async function handleUnlinkSupplement(parentExpense, sup) {
               v-if="expandedRows.has(expense.id) && expense.status === 'WAITING_RETURN' && Array.isArray(supplementCache[expense.id]) && supplementCache[expense.id].length === 0"
               class="border-b border-dashed border-purple-200"
             >
-              <td colspan="15" class="bg-purple-50 px-6 py-2.5">
+              <td colspan="16" class="bg-purple-50 px-6 py-2.5">
                 <div class="text-xs text-purple-400 opacity-60 flex items-center gap-1">
                   <Link2 :size="11" />
                   待退貨補件：尚未收到對應物品照
@@ -799,7 +839,15 @@ async function handleUnlinkSupplement(parentExpense, sup) {
               <!-- td10: 審核狀態 + 情境類型 badge -->
               <td class="px-3 py-1.5 whitespace-nowrap">
                 <div class="flex items-center gap-1 flex-wrap">
-                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-600 border border-purple-200">補件</span>
+                  <span
+                    v-if="sup.relation_type === 'VOID_REVERSAL' || sup.relation_type === 'RETURN_REVERSAL'"
+                    class="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 border border-red-200"
+                    title="系統自動產生的沖銷分錄，CSV 匯出為負數"
+                  >沖銷分錄</span>
+                  <span
+                    v-else
+                    class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-600 border border-purple-200"
+                  >補件</span>
                   <span
                     v-if="EDITABLE_RELATION_TYPES.includes(sup.relation_type)"
                     class="text-[10px] px-1.5 py-0.5 rounded border"
@@ -834,11 +882,11 @@ async function handleUnlinkSupplement(parentExpense, sup) {
 
               <!-- td13: 費用影像 -->
               <td class="px-3 py-1.5">
-                <div
-                  v-if="sup.image_url?.length"
-                  class="w-10 h-10 rounded overflow-hidden border border-purple-200"
-                >
-                  <img :src="sup.image_url[0]" alt="費用影像" class="w-full h-full object-cover" />
+                <div v-if="sup.image_url?.length" class="flex flex-col items-start gap-0.5">
+                  <div class="w-10 h-10 rounded overflow-hidden border border-purple-200">
+                    <img :src="sup.image_url[0]" alt="費用影像" class="w-full h-full object-cover" />
+                  </div>
+                  <span v-if="sup.relation_type" class="text-[9px] text-gray-400 leading-tight">{{ voucherPhotoLabel(sup.relation_type) }}</span>
                 </div>
                 <div v-else class="w-10 h-10 bg-gray-200 rounded border border-gray-300 flex items-center justify-center">
                   <span class="text-gray-400 text-xs">無</span>
@@ -858,13 +906,18 @@ async function handleUnlinkSupplement(parentExpense, sup) {
                 </div>
               </td>
 
-              <!-- td15: 項目說明 + 金額 -->
+              <!-- td15: 退貨紀錄 -->
+              <td class="px-3 py-1.5 text-gray-600 whitespace-nowrap text-xs">
+                {{ sup.return_record || '-' }}
+              </td>
+
+              <!-- td16: 項目說明 + 金額 -->
               <td class="px-3 py-1.5 text-gray-600 max-w-xs">
                 <div class="line-clamp-2 text-xs leading-relaxed">
                   {{ sup.user_description || '-' }}
                 </div>
-                <div v-if="sup.total_amount" class="text-xs text-gray-400 mt-0.5">
-                  {{ formatAmount(sup.total_amount) }}
+                <div v-if="sup.total_amount !== null && sup.total_amount !== undefined" class="text-xs mt-0.5" :class="amountColorClass(sup.total_amount)">
+                  {{ formatAmountSigned(sup.total_amount) }}
                 </div>
               </td>
             </tr>
@@ -872,7 +925,7 @@ async function handleUnlinkSupplement(parentExpense, sup) {
 
           <!-- 空資料提示 -->
           <tr v-if="visibleExpenses.length === 0">
-            <td colspan="14" class="px-4 py-10 text-center text-gray-400">
+            <td colspan="16" class="px-4 py-10 text-center text-gray-400">
               目前無符合條件的報帳紀錄
             </td>
           </tr>

@@ -365,18 +365,23 @@ def auto_link_records(
             original = find_active_expense_by_invoice_number(db, ref_inv, user_id=new_expense.user_id)
 
             if relation["type"] == "VOID_REPLACE" and original:
-                # 標記原始單為已被換單（保留審核狀態，CSV 以負數計）
+                # 標記原始單為已被換單（保留審核狀態）
                 original.relation_type = "VOID_ORIGINAL"
                 original.void_reason = _extract_void_reason(user_description) or "換貨換單"
-                # 串聯新單
+                original.voided_at = datetime.now(timezone.utc)
+                # 串聯新單，寫入退貨紀錄追蹤碼
                 new_expense.parent_id = original.id
                 new_expense.relation_type = "VOID_REPLACE"
                 new_expense.referenced_invoice_number = ref_inv
+                new_expense.return_record = ref_inv
                 db.commit()
                 logger.info(
                     "auto_link_records VOID_REPLACE: new=%s → old=%s",
                     new_expense.serial_number, original.serial_number,
                 )
+                # 自動建立沖銷分錄（VOID_REVERSAL），負數記錄落在當期報表
+                from services.expense_service import create_reversal_expense
+                create_reversal_expense(db, original, "VOID_REVERSAL")
 
             elif relation["type"] == "CREDIT_NOTE":
                 # 折讓：優先比對發票號碼，備援比對店家名稱 + 7 天內
@@ -387,9 +392,14 @@ def auto_link_records(
                     new_expense.parent_id = target.id
                     new_expense.relation_type = "CREDIT_NOTE"
                     new_expense.referenced_invoice_number = ref_inv
-                    # 折讓單 total_amount 為負數，加總後為淨額
-                    if target.total_amount is not None and new_expense.total_amount is not None:
-                        target.net_amount = target.total_amount + new_expense.total_amount
+                    new_expense.return_record = ref_inv
+                    # 確保折讓單金額為負數（OCR 可能回傳正數）
+                    if new_expense.total_amount is not None and new_expense.total_amount > 0:
+                        new_expense.total_amount = -new_expense.total_amount
+                        if new_expense.net_amount is not None and new_expense.net_amount > 0:
+                            new_expense.net_amount = -new_expense.net_amount
+                        if new_expense.tax_amount is not None and new_expense.tax_amount > 0:
+                            new_expense.tax_amount = -new_expense.tax_amount
                     db.commit()
                     logger.info(
                         "auto_link_records CREDIT_NOTE: new=%s → original=%s",
@@ -410,6 +420,7 @@ def auto_link_records(
                 if target:
                     new_expense.parent_id = target.id
                     new_expense.relation_type = "RETURN_SUPPLEMENT"
+                    new_expense.return_record = target.invoice_number or target.serial_number
                     db.commit()
                     logger.info(
                         "auto_link_records RETURN_SUPPLEMENT(補差額): new=%s → original=%s",
