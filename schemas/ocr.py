@@ -28,8 +28,8 @@ class VoucherOCRResult(BaseModel):
     voucher_category: str | None = None
     # 子類型，例如 HSR_TICKET / FUEL / EXEMPT_INVOICE 等（OCR 內部用）
     voucher_subtype: str | None = None
-    # 費用科目中文名稱（對應 config/expense_categories.json categories[].label）
-    # 無法判斷時填「現場拍攝用品購買」
+    # 費用科目中文名稱（對應 core/expense_categories.py EXPENSE_CATEGORIES[].label）
+    # 無法判斷時填「勞-未設定」
     expense_category: str | None = None
 
     # ── GenAI 推理說明 ───────────────────────────────────────────────────────

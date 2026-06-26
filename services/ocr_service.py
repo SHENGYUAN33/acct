@@ -59,7 +59,7 @@ _PROMPT_TEMPLATE = """你是一個具備台灣會計知識的財務審計助理�
 
   {CATEGORY_LIST}
 
-  **重要：若無法判斷，expense_category 填「勞-現場拍攝用品購買」**
+  **重要：若無法判斷，expense_category 填「勞-未設定」**
 
 場景推理範例：
   - 「店名含『中油、台塑石化、全國加油』+ POS 列印格式 → 加油站收據 → voucher_category=RECEIPT, voucher_subtype=FUEL, expense_category=勞-交通費-油資」
@@ -72,7 +72,7 @@ _PROMPT_TEMPLATE = """你是一個具備台灣會計知識的財務審計助理�
   - 「遠通電收/ETC 通行費明細紀錄，含多筆通行時間與路段 → 對帳單格式非收據 → voucher_category=OTHER, expense_category=勞-交通費-過路費」
   - 「計程車運價證明（政府制式表格，手寫車資/車號/駕駛人）→ 證明文件格式非收據 → voucher_category=OTHER, expense_category=勞-交通費-計程車資」
   - 「文具四件、A4 影印紙 → expense_category=勞-文具用品」
-  - 「五金行收據、商品名稱不明 → 無法確定部門 → expense_category=勞-現場拍攝用品購買」
+  - 「五金行收據、商品名稱不明 → 無法確定部門 → expense_category=勞-未設定」
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【步驟二：欄位萃取與合理性推論】

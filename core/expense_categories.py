@@ -59,6 +59,7 @@ EXPENSE_CATEGORIES: Final[list[dict[str, str]]] = [
     {"key": "POST_ARCHIVE",                "label": "勞-檔管物品購置"},
     {"key": "POST_VFX",                    "label": "勞-特效素材費"},
     {"key": "HR_WELFARE_GENERAL",          "label": "勞-職工福利"},
+    {"key": "UNSET",                       "label": "勞-未設定"},
 ]
 
 # ── 衍生索引（從 EXPENSE_CATEGORIES 自動產生，不得手動維護）─────────────────
@@ -66,7 +67,7 @@ KEY_TO_LABEL: Final[dict[str, str]] = {c["key"]: c["label"] for c in EXPENSE_CAT
 LABEL_TO_KEY: Final[dict[str, str]] = {c["label"]: c["key"] for c in EXPENSE_CATEGORIES}
 VALID_KEYS:   Final[frozenset[str]] = frozenset(KEY_TO_LABEL)
 
-DEFAULT_KEY: Final[str] = "PRODUCTION_SUPPLIES_GENERAL"
+DEFAULT_KEY: Final[str] = "UNSET"
 
 # ── 舊格式相容映射（Label 改名 / 無前綴 / 英文 parent key → 現行 key）────────
 # 只有 normalize_to_key() 需要讀這份表，業務邏輯不得直接引用
@@ -112,6 +113,8 @@ _LEGACY_TO_KEY: Final[dict[str, str]] = {
     "HR_WELFARE": "HR_WELFARE_GENERAL",
     "INSURANCE": "HR_INSURANCE",    "GENERAL": "PRODUCTION_SUPPLIES_GENERAL",
     "OTHER": "MISC_GENERAL",
+    # 未設定相容
+    "未設定": "UNSET",              "勞-未設定": "UNSET",
 }
 
 

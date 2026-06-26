@@ -571,7 +571,7 @@ async function handleUnlinkSupplement(parentExpense, sup) {
                     class="inline-block text-xs px-1.5 py-0.5 rounded mr-1 mb-0.5 bg-purple-100 text-purple-700"
                   >{{ cat }}</span>
                 </template>
-                <span v-else class="text-gray-400">-</span>
+                <span v-else class="inline-block text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">勞-未設定</span>
               </td>
 
               <!-- 費用影像縮圖（顯示第一張） -->
@@ -877,7 +877,7 @@ async function handleUnlinkSupplement(parentExpense, sup) {
                     class="inline-block text-xs px-1.5 py-0.5 rounded mr-1 mb-0.5 bg-purple-100 text-purple-700"
                   >{{ cat }}</span>
                 </template>
-                <span v-else class="text-gray-400 text-xs">-</span>
+                <span v-else class="inline-block text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">勞-未設定</span>
               </td>
 
               <!-- td13: 費用影像 -->
