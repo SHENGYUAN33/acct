@@ -236,6 +236,33 @@ def test_batch_voucher_categories_dedup() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 測試案例 5b：voucher_category=OTHER（高鐵/台鐵票等）仍應填入 expense_date
+# 迴歸測試：_PRIMARY_VOUCHER_PRIORITY 曾使用不存在的 voucher_category 值
+# （TRANSPORTATION/LABOR_SERVICE 等），導致 OTHER 類憑證永遠選不到主憑證，
+# expense_date/tax_amount/net_amount 因此完全沒有寫入 Expense。
+# ---------------------------------------------------------------------------
+
+def test_batch_other_category_fills_expense_date() -> None:
+    """單張 voucher_category=OTHER（高鐵票根）→ expense_date 仍應正確帶入。"""
+    ocr_results = [
+        make_ocr_result(
+            category="OTHER",
+            total_amount=1330.0,
+            extra_fields={
+                "expense_date": "2026-01-27",
+                "route_from": "南港",
+                "route_to": "台中",
+            },
+        ),
+    ]
+    expense = _call_create_batch(ocr_results)
+
+    assert expense.expense_date is not None, "OTHER 類憑證的 expense_date 不應為 None"
+    assert str(expense.expense_date) == "2026-01-27"
+    assert expense.total_amount == Decimal("1330.00")
+
+
+# ---------------------------------------------------------------------------
 # 測試案例 6：image_count 等於 len(pending_images)
 # ---------------------------------------------------------------------------
 

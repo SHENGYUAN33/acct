@@ -217,7 +217,7 @@ const activeFilterCount = computed(() =>
           <!-- 分隔線 -->
           <div class="h-5 w-px bg-gray-200 hidden sm:block"></div>
 
-          <!-- 搜尋（案件編號 / 上傳者姓名） -->
+          <!-- 搜尋（案件編號 / 上傳者姓名 / 發票號碼） -->
           <div class="flex items-center gap-1.5">
             <div class="relative">
               <Search :size="13" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
@@ -225,7 +225,7 @@ const activeFilterCount = computed(() =>
                 v-model="localQ"
                 @keydown="onSearchKeydown"
                 type="text"
-                placeholder="案件編號 / 姓名（Enter 搜尋）"
+                placeholder="編號/姓名/發票號碼"
                 class="border rounded pl-7 pr-3 py-1.5 text-sm text-gray-700 w-52 transition-colors"
                 :class="store.filters.q ? 'border-blue-400' : 'border-gray-300'"
               />

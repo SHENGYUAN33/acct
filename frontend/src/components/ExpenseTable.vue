@@ -826,6 +826,7 @@ async function handleUnlinkSupplement(parentExpense, sup) {
                     <Plus :size="13" />
                   </button>
                   <button
+                    v-if="sup.relation_type !== 'VOID_REVERSAL' && sup.relation_type !== 'RETURN_REVERSAL'"
                     @click="handleUnlinkSupplement(expense, sup)"
                     :disabled="unlinkingSupplementId === sup.id"
                     class="w-7 h-7 bg-orange-400 hover:bg-orange-500 disabled:opacity-50 text-white rounded flex items-center justify-center transition-colors"

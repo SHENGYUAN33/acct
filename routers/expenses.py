@@ -75,7 +75,7 @@ def list_expenses(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=200),
     include_inactive: bool = Query(default=False, description="是否包含已作廢（REPLACED_VOID）記錄"),
-    q: str | None = Query(default=None, description="模糊搜尋：案件編號或上傳者姓名"),
+    q: str | None = Query(default=None, description="模糊搜尋：案件編號、上傳者姓名或發票號碼"),
     referenced_invoice_number: str | None = Query(default=None, description="篩選指定原始憑證號碼的補件"),
     has_duplicate: bool | None = Query(default=None, description="True 時只回傳疑似重複憑證的 Expense"),
     relation_type: str | None = Query(default=None, description="精確篩選補件類型，如 RETURN_SUPPLEMENT"),

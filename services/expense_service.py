@@ -205,7 +205,7 @@ def list_expenses(
     """Return (total_count, expenses) with optional filters and pagination.
 
     include_inactive=False（預設）：排除 is_active=False 的作廢記錄，避免重覆計算。
-    q：模糊搜尋案件編號或上傳者姓名（ILIKE）。
+    q：模糊搜尋案件編號、上傳者姓名或發票號碼（ILIKE）。
     referenced_invoice_number：精確篩選補件所參考的原始憑證號碼。
     has_duplicate=True：只回傳 possible_duplicate_of 非 null 的疑似重複記錄。
     relation_type：精確篩選補件類型（如 RETURN_SUPPLEMENT）。
@@ -232,7 +232,9 @@ def list_expenses(
     if q:
         pattern = f"%{q}%"
         stmt = stmt.where(
-            (Expense.serial_number.ilike(pattern)) | (Expense.uploader_name.ilike(pattern))
+            (Expense.serial_number.ilike(pattern))
+            | (Expense.uploader_name.ilike(pattern))
+            | (Expense.invoice_number.ilike(pattern))
         )
     if referenced_invoice_number:
         stmt = stmt.where(Expense.referenced_invoice_number == referenced_invoice_number)
@@ -469,16 +471,17 @@ def replace_expense_image(
 # ---------------------------------------------------------------------------
 
 # 主憑證優先級（越前面優先級越高；CREDIT_NOTE 不作為主憑證）
+# 必須對應 OCR prompt（services/ocr_service.py 步驟 1A）實際輸出的 voucher_category
+# 列舉值：INVOICE / RECEIPT / LABOR_FORM / DEPOSIT / OTHER。
+# 高鐵/台鐵票、保費單、租約、水電帳單、郵局收據等一律歸類為 OTHER，
+# 靠 transport_type / insurance_type 等子欄位區分細節，不會出現獨立的
+# TRANSPORTATION / INSURANCE / RENTAL 等 voucher_category 值。
 _PRIMARY_VOUCHER_PRIORITY: list[str] = [
     "INVOICE",
     "RECEIPT",
-    "LABOR_SERVICE",
-    "INSURANCE",
-    "RENTAL",
-    "ACCOMMODATION",
-    "UTILITY",
-    "POSTAGE",
-    "TRANSPORTATION",
+    "LABOR_FORM",
+    "DEPOSIT",
+    "OTHER",
 ]
 
 
@@ -642,8 +645,8 @@ def _pick_primary_fields(ocr_results: list[VoucherOCRResult]) -> dict:
         kwargs["seller_name"] = primary.seller_name
         kwargs["seller_tax_id"] = primary.seller_tax_id
 
-    # ── LABOR_SERVICE ──────────────────────────────────────
-    elif cat == "LABOR_SERVICE":
+    # ── LABOR_FORM ─────────────────────────────────────────
+    elif cat == "LABOR_FORM":
         kwargs["seller_name"] = primary.payee_name
 
     return {k: v for k, v in kwargs.items() if v is not None}
@@ -715,8 +718,7 @@ def create_batch_expense(
     批次報帳彙整：將多張發票/憑證圖片整合為單一 Expense 記錄。
 
     費用彙整規則：
-    - 主憑證優先級：INVOICE > RECEIPT > LABOR_SERVICE > INSURANCE > RENTAL >
-                    ACCOMMODATION > UTILITY > POSTAGE > TRANSPORTATION
+    - 主憑證優先級：INVOICE > RECEIPT > LABOR_FORM > DEPOSIT > OTHER
       （取第一順位欄位填入 expenses；CREDIT_NOTE 不作為主憑證）
     - total_amount：加總所有 is_voucher=True 且 total_amount 非 null 的金額
       （CREDIT_NOTE 的 total_amount 已確保為負數，直接加總）
@@ -986,6 +988,13 @@ def pair_expenses(
     # 換貨收據配對確認：原始 WAITING_RETURN 記錄沖銷時間
     if original.status == ExpenseStatus.WAITING_RETURN and original.voided_at is None:
         original.voided_at = datetime.now(timezone.utc)
+    # 換新發票（VOID_REPLACE）配對確認：標記原始單為 VOID_ORIGINAL，供沖銷/報表判斷使用
+    if supplement.relation_type == "VOID_REPLACE" and original.relation_type != "VOID_ORIGINAL":
+        original.relation_type = "VOID_ORIGINAL"
+        if original.void_reason is None:
+            original.void_reason = "換貨換單"
+        if original.voided_at is None:
+            original.voided_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(supplement)
     logger.info(
@@ -993,8 +1002,18 @@ def pair_expenses(
         supplement.serial_number, original.serial_number,
     )
     # 折讓單（CREDIT_NOTE）本身即為負數記錄，不需要沖銷分錄。
-    # 換貨收據（RETURN_SUPPLEMENT / AMOUNT_CORRECTION）才需要自動建立 RETURN_REVERSAL。
-    if supplement.relation_type in REVERSAL_REQUIRED_TYPES:
+    # 換新發票（VOID_REPLACE）與換貨收據（RETURN_SUPPLEMENT / AMOUNT_CORRECTION）
+    # 才需要自動建立沖銷分錄（分別為 VOID_REVERSAL / RETURN_REVERSAL）。
+    if supplement.relation_type == "VOID_REPLACE":
+        existing_reversal = db.scalar(
+            select(Expense).where(
+                Expense.parent_id == original.id,
+                Expense.relation_type == "VOID_REVERSAL",
+            )
+        )
+        if not existing_reversal:
+            create_reversal_expense(db, original, "VOID_REVERSAL")
+    elif supplement.relation_type in REVERSAL_REQUIRED_TYPES:
         existing_reversal = db.scalar(
             select(Expense).where(
                 Expense.parent_id == original.id,

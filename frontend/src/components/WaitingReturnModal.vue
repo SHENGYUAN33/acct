@@ -392,6 +392,14 @@ function relationTypeLabel(type) {
   return getRelationTypeConfig(type)?.label ?? ''
 }
 
+// ── 補件卡片備註文字：併入退貨紀錄（原憑證號碼／日期金額等）與使用者輸入的備註
+function supplementNoteText(sup) {
+  const parts = []
+  if (sup.return_record) parts.push(`原憑證：${sup.return_record}`)
+  if (sup.user_description) parts.push(sup.user_description)
+  return parts.join(' | ')
+}
+
 // ── 案件確認完成
 async function finalizeCase(item) {
   const invoice = item.invoice
@@ -622,7 +630,7 @@ async function unlinkSupplement(supplement, invoice) {
                 <input
                   v-model="leftAddQuery"
                   @keyup.enter="searchForLeftAdd"
-                  placeholder="輸入案件編號或關鍵字..."
+                  placeholder="輸入案件編號"
                   class="flex-1 text-xs px-2.5 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-teal-400"
                 />
                 <button @click="searchForLeftAdd" :disabled="isLeftAdding"
@@ -888,7 +896,7 @@ async function unlinkSupplement(supplement, invoice) {
                 <input
                   v-model="rightAddQuery"
                   @keyup.enter="searchForRightAdd"
-                  placeholder="輸入案件編號或關鍵字..."
+                  placeholder="輸入案件編號"
                   class="flex-1 text-xs px-2.5 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:border-teal-400"
                 />
                 <button @click="searchForRightAdd" :disabled="isRightAdding"
@@ -1035,12 +1043,12 @@ async function unlinkSupplement(supplement, invoice) {
                 <span v-if="sup.invoice_number" class="text-[10px] font-mono text-gray-400 truncate">{{ sup.invoice_number }}</span>
               </div>
 
-              <!-- 備註 -->
+              <!-- 備註（含退貨紀錄：原憑證號碼／日期金額） -->
               <div class="mb-1.5">
                 <p class="text-[10px] rounded px-1.5 py-1"
-                  :class="sup.user_description ? 'bg-amber-50 text-amber-700' : 'text-gray-300 italic'"
-                  :title="sup.user_description || ''">
-                  {{ sup.user_description || '無備註' }}
+                  :class="supplementNoteText(sup) ? 'bg-amber-50 text-amber-700' : 'text-gray-300 italic'"
+                  :title="supplementNoteText(sup)">
+                  {{ supplementNoteText(sup) || '無備註' }}
                 </p>
               </div>
 

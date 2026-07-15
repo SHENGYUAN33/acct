@@ -71,7 +71,7 @@ export const useExpenseStore = defineStore('expense', () => {
     dept: '',
     category: '',   // 憑證類別中文標籤（client-side）
     status: '',     // 審核狀態（server-side）
-    q: '',          // 搜尋關鍵字：案件編號/上傳者（server-side）
+    q: '',          // 搜尋關鍵字：案件編號/上傳者/發票號碼（server-side）
     dateFrom: '',
     dateTo: '',
     submitter: '',
